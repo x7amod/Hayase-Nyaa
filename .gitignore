@@ -1,0 +1,4 @@
+.vercel
+*.ansi
+.vscode/
+test/fixtures/rss/

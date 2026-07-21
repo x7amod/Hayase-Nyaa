@@ -1,0 +1,21 @@
+[
+  {
+    "id": "hayase.extension.nyaanew",
+    "manifestVersion": 2,
+    "deprecated": false,
+    "name": "Nyaa",
+    "description": "Searches Nyaa for anime torrents.",
+    "version": "1.1.1",
+    "type": "torrent",
+    "accuracy": "medium",
+    "ratio": 0,
+    "media": "both",
+    "languages": [
+      "ALL"
+    ],
+    "icon": "https://nyaa.si/static/favicon.png",
+    "url": "aHR0cHM6Ly9ueWFhLnNp",
+    "update": "https://raw.githubusercontent.com/x7amod/Hayase-Nyaa/main/hayase/index.json",
+    "code": "https://raw.githubusercontent.com/x7amod/Hayase-Nyaa/main/hayase/nyaasi.js"
+  }
+]
