@@ -8,6 +8,7 @@ export default new class NyaaSi {
 
   batch(query) {
     console.log('[NyaaSi] batch()', { titles: query.titles, episodeCount: query.episodeCount, resolution: query.resolution, exclusions: query.exclusions, anilistId: query.anilistId })
+    console.log('[NyaaSi] media.status:', query.media?.status)
     return this.search(query, { mode: 'batch', episodeCount: query.episodeCount })
   }
 
