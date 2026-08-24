@@ -9,6 +9,10 @@ export default new class NyaaSi {
   batch(query) {
     console.log('[NyaaSi] batch()', { titles: query.titles, episodeCount: query.episodeCount, resolution: query.resolution, exclusions: query.exclusions, anilistId: query.anilistId })
     console.log('[NyaaSi] media.status:', query.media?.status)
+    if (query.media?.status === 'RELEASING') {
+      console.log('[NyaaSi] skipping batch — show is still airing')
+      return []
+    }
     return this.search(query, { mode: 'batch', episodeCount: query.episodeCount })
   }
 
@@ -85,6 +89,7 @@ function buildSearchPlan(titles = [], searchContext = {}) {
   const cleanTitles = (titles || [])
     .filter(title => typeof title === 'string' && title.trim())
     .map(normalizeSearch)
+    .filter(title => title && !isFullyJapanese(title))
     .filter(Boolean)
 
   // (1) base form of every title — both romaji and English always searched
@@ -133,6 +138,8 @@ function buildSearchPlan(titles = [], searchContext = {}) {
 
   // (5) batch-qualified terms — when in batch mode, search for batch-specific
   //     patterns: the word "batch", "complete", and episode ranges like "1-21".
+  //     Also include single episode terms since some batch releases are labeled
+  //     with individual episode numbers (e.g. a pack uploaded per-episode).
   //     Nyaa treats ~ as a word separator, but some releases use "01 ~ 21"
   //     with spaces, so include both - and ~ variants.
   if (searchContext.mode === 'batch') {
@@ -159,6 +166,16 @@ function buildSearchPlan(titles = [], searchContext = {}) {
 
 function normalizeSearch(title) {
   return String(title).normalize('NFKC').replace(/\s+/g, ' ').trim()
+}
+
+// Returns true if the string is predominantly Japanese characters
+// (hiragana, katakana, kanji, Japanese punctuation).
+function isFullyJapanese(text) {
+  const cleaned = text.replace(/[\s\-_.:!?'"()（）「」『』【】／]/g, '')
+  if (!cleaned) return false
+  const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/
+  const nonJapanese = cleaned.replace(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, '')
+  return nonJapanese.length === 0
 }
 
 function stripQualifiers(title) {
@@ -300,6 +317,11 @@ function matchesQuery(title, query, searchContext, queryTitles) {
       return false
     }
   }
+
+  if (searchContext.mode === 'batch') {
+    if (!matchesBatch(title, searchContext.episodeCount)) return false
+  }
+
   return true
 }
 
