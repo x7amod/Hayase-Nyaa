@@ -3,7 +3,7 @@ export default new class NyaaSi {
 
   single(query) {
     console.log('[NyaaSi] single()', { titles: query.titles, episode: query.episode, resolution: query.resolution, exclusions: query.exclusions, anilistId: query.anilistId })
-    return this.search(query, { mode: 'single', episode: query.episode })
+    return this.search(query, { mode: 'single', episode: query.episode, resolution: query.resolution })
   }
 
   batch(query) {
@@ -102,12 +102,21 @@ function buildSearchPlan(titles = [], searchContext = {}) {
 
   // (3) episode-qualified terms for single-episode lookups
   if (searchContext.mode === 'single' && searchContext.episode) {
+    const ep = searchContext.episode
+    const padded = String(ep).padStart(2, '0')
+    const res = searchContext.resolution
     for (const base of cleanTitles) {
       const stripped = stripQualifiers(base) || base
-      add(`${stripped} ${searchContext.episode}`, stripped)
+      add(`${stripped} ${ep}`, stripped)
+      if (padded !== String(ep)) add(`${stripped} ${padded}`, stripped)
+      if (res) add(`${stripped} ${ep} ${res}p`, stripped)
       // Also add !/?-stripped variant for scene groups that omit punctuation
       const cleanBase = stripped.replace(/[!?]+/g, '') || stripped
-      if (cleanBase !== stripped) add(`${cleanBase} ${searchContext.episode}`, cleanBase)
+      if (cleanBase !== stripped) {
+        add(`${cleanBase} ${ep}`, cleanBase)
+        if (padded !== String(ep)) add(`${cleanBase} ${padded}`, cleanBase)
+        if (res) add(`${cleanBase} ${ep} ${res}p`, cleanBase)
+      }
     }
   }
 
@@ -169,13 +178,14 @@ function normalizeSearch(title) {
 }
 
 // Returns true if the string is predominantly Japanese characters
-// (hiragana, katakana, kanji, Japanese punctuation).
+// (hiragana, katakana, kanji, Japanese punctuation). Allows a small
+// number of Latin characters (e.g. "S" in "Sランク") as long as the
+// text is mostly Japanese.
 function isFullyJapanese(text) {
-  const cleaned = text.replace(/[\s\-_.:!?'"()（）「」『』【】／]/g, '')
+  const cleaned = text.replace(/[\s\-_.:!?~'"()（）「」【】／＆]/g, '')
   if (!cleaned) return false
-  const japaneseChars = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/
   const nonJapanese = cleaned.replace(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, '')
-  return nonJapanese.length === 0
+  return nonJapanese.length <= 2
 }
 
 function stripQualifiers(title) {
