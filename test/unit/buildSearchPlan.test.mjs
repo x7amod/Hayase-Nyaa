@@ -31,6 +31,22 @@ describe('buildSearchPlan', () => {
       assert.ok(terms.some(t => t.includes('Mairimashita Iruma-kun') && !t.includes('!')),
         'should have !-stripped variant')
     })
+
+    it('removes repeated trailing qualifiers', () => {
+      const plan = buildSearchPlan(['Show (Dub) [1080p]'], { mode: 'movie' })
+      const terms = plan.map(p => p.term)
+      assert.ok(terms.includes('Show (Dub)'))
+      assert.ok(terms.includes('Show [1080p]'))
+      assert.ok(terms.includes('Show'))
+    })
+
+    it('removes nested trailing qualifiers', () => {
+      const title = 'Show (Dub (Dual Audio)) [1080p]'
+      const plan = buildSearchPlan([title], { mode: 'single', episode: 4 })
+      const terms = plan.map(p => p.term)
+      assert.ok(terms.includes('Show'))
+      assert.ok(terms.includes('Show 4'))
+    })
   })
 
   describe('batch mode', () => {

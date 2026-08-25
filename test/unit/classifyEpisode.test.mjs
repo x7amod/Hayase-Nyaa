@@ -14,6 +14,15 @@ describe('classifyEpisode', () => {
       assert.strictEqual(classifyEpisode('[SubsPlease] Sousou no Frieren - 12 (1080p) [A0234FCE].mkv', 12), 'exact')
     })
 
+    it('returns exact for dash-separated episode without trailing metadata', () => {
+      assert.strictEqual(classifyEpisode('Show - 02', 2), 'exact')
+    })
+
+    it('does not treat a season number as the episode', () => {
+      assert.strictEqual(classifyEpisode('Show 4 - 14', 14), 'exact')
+      assert.strictEqual(classifyEpisode('Show 4 - 14', 4), 'conflict')
+    })
+
     it('returns exact for large episode numbers', () => {
       assert.strictEqual(classifyEpisode('[SubsPlease] One Piece - 1100 (1080p)', 1100), 'exact')
     })

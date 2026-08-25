@@ -34,9 +34,18 @@ describe('matchesBatch', () => {
     it('rejects individual: [SubsPlease] ... - 21 (1080p)', () => {
       assert.strictEqual(matchesBatch('[SubsPlease] Mairimashita! Iruma-kun S3 - 21 (1080p) [FE27ABFE].mkv', 21), false)
     })
-    it('detects season keyword in: [Erai-raws] ... 3rd Season - 21 END', () => {
-      // "Season" is a batch keyword, so this is correctly detected as batch-like
-      assert.strictEqual(matchesBatch('[Erai-raws] Mairimashita! Iruma-kun 3rd Season - 21 END [1080p][Multiple Subtitle]', 21), true)
+    it('rejects season notation on an individual episode', () => {
+      assert.strictEqual(matchesBatch('[Erai-raws] Mairimashita! Iruma-kun 3rd Season - 21 END [1080p][Multiple Subtitle]', 21), false)
+    })
+  })
+
+  describe('season-only titles', () => {
+    it('accepts a season title without an episode marker', () => {
+      assert.strictEqual(matchesBatch('Show Season 3 [1080p]', 12), true)
+    })
+
+    it('rejects S1 episode notation without batch evidence', () => {
+      assert.strictEqual(matchesBatch('Show S1 - 01 [1080p]', 12), false)
     })
   })
 

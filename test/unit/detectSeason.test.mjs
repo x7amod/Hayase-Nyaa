@@ -2,7 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert'
 import { getInternals } from '../helpers/loader.mjs'
 
-const { detectSeason } = getInternals()
+const { detectSeason, detectResultSeason } = getInternals()
 
 describe('detectSeason', () => {
   describe('S notation', () => {
@@ -29,9 +29,18 @@ describe('detectSeason', () => {
   describe('trailing bare number', () => {
     it('detects trailing 4', () => assert.strictEqual(detectSeason('Mairimashita! Iruma-kun 4'), 4))
     it('detects trailing 3', () => assert.strictEqual(detectSeason('Show 3'), 3))
-    it('detects trailing episode number as season (by design)', () => {
-      // detectSeason treats trailing bare numbers as season, even if they're episode numbers
-      assert.strictEqual(detectSeason('[SubsPlease] Show - 12'), 12)
+    it('rejects trailing number preceded by dash (episode slot)', () => {
+      assert.strictEqual(detectSeason('[SubsPlease] Show - 12'), null)
+    })
+  })
+
+  describe('result titles', () => {
+    it('does not treat an undelimited trailing number as a result season', () => {
+      assert.strictEqual(detectResultSeason('Movie 2'), null)
+    })
+
+    it('detects a bare season when an episode delimiter follows it', () => {
+      assert.strictEqual(detectResultSeason('Show 4 - 14'), 4)
     })
   })
 })

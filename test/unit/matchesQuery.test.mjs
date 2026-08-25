@@ -30,6 +30,13 @@ describe('matchesQuery — episode filtering', () => {
     assert.strictEqual(results.length, 1)
     assert.ok(results[0].title.includes('E10'))
   })
+
+  it('filters out a range release in single mode', async () => {
+    const results = await searchSingle(['Show'], 5, '1080', [
+      '[SubsPlease] Show - 01-12 (1080p) [ABC].mkv',
+    ])
+    assert.strictEqual(results.length, 0)
+  })
 })
 
 describe('matchesQuery — resolution filtering', () => {

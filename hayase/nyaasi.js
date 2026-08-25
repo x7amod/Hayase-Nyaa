@@ -1,3 +1,5 @@
+const MAX_CONCURRENT_SEARCHES = 2
+
 export default new class NyaaSi {
   base = 'https://nyaa.si/?page=rss&c=1_0&q='
 
@@ -32,9 +34,12 @@ export default new class NyaaSi {
       let results = []
       const queryTitles = searchPlan.map(entry => entry.sourceTitle)
 
-      for (const { term } of searchPlan) {
-        const data = await fetchResults(fetcher, this.base, term, query, searchContext)
-        results = dedupeResults(results.concat(data.map(toTorrentResult)))
+      // Search terms are independent, but Nyaa throttles unbounded bursts.
+      const outcomes = await fetchSearchPlan(fetcher, this.base, searchPlan)
+      for (const outcome of outcomes) {
+        if (outcome.status === 'fulfilled') {
+          results = dedupeResults(results.concat(outcome.value.map(toTorrentResult)))
+        }
       }
 
       console.log('[NyaaSi] raw results:', results.length)
@@ -66,6 +71,30 @@ export default new class NyaaSi {
   }
 }()
 
+async function fetchSearchPlan(fetcher, base, searchPlan) {
+  const outcomes = new Array(searchPlan.length)
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (nextIndex < searchPlan.length) {
+      const index = nextIndex++
+      const { term } = searchPlan[index]
+      try {
+        outcomes[index] = {
+          status: 'fulfilled',
+          value: await fetchResults(fetcher, base, term),
+        }
+      } catch (reason) {
+        outcomes[index] = { status: 'rejected', reason }
+      }
+    }
+  }
+
+  const workerCount = Math.min(MAX_CONCURRENT_SEARCHES, searchPlan.length)
+  await Promise.all(Array.from({ length: workerCount }, worker))
+  return outcomes
+}
+
 // Build the list of Nyaa queries to run.
 //
 // Rules:
@@ -89,7 +118,7 @@ function buildSearchPlan(titles = [], searchContext = {}) {
   const cleanTitles = (titles || [])
     .filter(title => typeof title === 'string' && title.trim())
     .map(normalizeSearch)
-    .filter(title => title && !isFullyJapanese(title))
+    .filter(title => title && !isPredominantlyJapanese(title))
     .filter(Boolean)
 
   // (1) base form of every title — both romaji and English always searched
@@ -181,7 +210,7 @@ function normalizeSearch(title) {
 // (hiragana, katakana, kanji, Japanese punctuation). Allows a small
 // number of Latin characters (e.g. "S" in "Sランク") as long as the
 // text is mostly Japanese.
-function isFullyJapanese(text) {
+function isPredominantlyJapanese(text) {
   const cleaned = text.replace(/[\s\-_.:!?~'"()（）「」【】／＆]/g, '')
   if (!cleaned) return false
   const nonJapanese = cleaned.replace(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, '')
@@ -189,31 +218,118 @@ function isFullyJapanese(text) {
 }
 
 function stripQualifiers(title) {
-  return String(title)
-    .replace(/\s*\([^)]*\)\s*/g, ' ')
-    .replace(/\s*\[[^\]]*\]\s*/g, ' ')
-    .replace(/\s*:[^:]*$/g, '')   // drop subtitle after a colon, e.g. "Show: Subtitle"
+  let stripped = removeBalancedGroups(String(title), '(', ')')
+  stripped = removeBalancedGroups(stripped, '[', ']')
+  const colon = topLevelColonIndex(stripped)
+  return (colon >= 0 ? stripped.slice(0, colon) : stripped)
     .replace(/\s+/g, ' ')
     .trim()
 }
 
+function removeBalancedGroups(text, open, close) {
+  const stack = []
+  const ranges = []
+
+  for (let index = 0; index < text.length; index++) {
+    if (text[index] === open) stack.push(index)
+    else if (text[index] === close && stack.length) {
+      const start = stack.pop()
+      if (!stack.length) ranges.push({ start, end: index + 1 })
+    }
+  }
+
+  if (!ranges.length) return text
+  let stripped = text
+  for (let index = ranges.length - 1; index >= 0; index--) {
+    const { start, end } = ranges[index]
+    stripped = stripped.slice(0, start) + stripped.slice(end)
+  }
+  return stripped
+}
+
 function buildSearchVariants(title) {
   const normalized = normalizeSearch(title)
-  const variants = [normalized]
-  const withoutParenthetical = normalized.replace(/\s*\([^)]*\)\s*$/, '').trim()
-  if (withoutParenthetical && withoutParenthetical !== normalized) variants.push(withoutParenthetical)
-  const withoutBracketed = normalized.replace(/\s*\[[^\]]*\]\s*$/, '').trim()
-  if (withoutBracketed && withoutBracketed !== normalized) variants.push(withoutBracketed)
-  const withoutColon = normalized.replace(/\s*:[^:]*$/, '').trim()
-  if (withoutColon && withoutColon !== normalized) variants.push(withoutColon)
-  // Strip ! and ? so scene groups without punctuation in their titles are found
-  // (e.g. Erai-raws uses "Mairimashita Iruma-kun" without the "!")
-  const withoutPunct = normalized.replace(/[!?]/g, '').replace(/\s+/g, ' ').trim()
-  if (withoutPunct && withoutPunct !== normalized) variants.push(withoutPunct)
+  const variants = []
+  const seen = new Set()
+  const add = (variant) => {
+    const value = normalizeSearch(variant)
+    if (!value || seen.has(value.toLowerCase())) return
+    seen.add(value.toLowerCase())
+    variants.push(value)
+  }
+
+  add(normalized)
+  for (let index = 0; index < variants.length; index++) {
+    const current = variants[index]
+    for (const stripped of stripTrailingQualifierVariants(current)) add(stripped)
+
+    // Strip ! and ? so scene groups without punctuation in their titles are found
+    // (e.g. Erai-raws uses "Mairimashita Iruma-kun" without the "!")
+    add(current.replace(/[!?]/g, '').replace(/\s+/g, ' ').trim())
+  }
+
   return variants
 }
 
-async function fetchResults(fetcher, base, term, query, searchContext, title) {
+function stripTrailingQualifierVariants(title) {
+  const text = String(title).trim()
+  const variants = []
+
+  for (const { start, end } of trailingQualifierRanges(text)) {
+    variants.push(text.slice(0, start) + text.slice(end))
+  }
+
+  const colon = topLevelColonIndex(text)
+  if (colon >= 0) variants.push(text.slice(0, colon))
+
+  return variants
+}
+
+function trailingQualifierRanges(text) {
+  const ranges = []
+  let end = text.length
+
+  while (end > 0) {
+    while (end > 0 && /\s/.test(text[end - 1])) end--
+    const close = text[end - 1]
+    const open = close === ')' ? '(' : close === ']' ? '[' : null
+    if (!open) break
+
+    let depth = 0
+    let start = -1
+    for (let index = end - 1; index >= 0; index--) {
+      if (text[index] === close) depth++
+      else if (text[index] === open && --depth === 0) {
+        start = index
+        break
+      }
+    }
+    if (start < 0) break
+
+    ranges.unshift({ start, end })
+    end = start
+  }
+
+  return ranges
+}
+
+function topLevelColonIndex(text) {
+  let parentheses = 0
+  let brackets = 0
+
+  for (let index = text.length - 1; index >= 0; index--) {
+    const char = text[index]
+    if (char === ')') parentheses++
+    else if (char === '(') parentheses--
+    else if (char === ']') brackets++
+    else if (char === '[') brackets--
+    else if (char === ':' && parentheses === 0 && brackets === 0) return index
+  }
+
+  return -1
+}
+
+async function fetchResults(fetcher, base, term) {
   const res = await fetcher(base + encodeURIComponent(term))
   if (!res.ok) return []
 
@@ -223,6 +339,7 @@ async function fetchResults(fetcher, base, term, query, searchContext, title) {
 
 function toTorrentResult(item) {
   const tags = normalizeTags(item.tags || item.Tags)
+  const parsedDate = item.DateUploaded ? new Date(item.DateUploaded) : null
   return {
     title: item.Name,
     link: item.Magnet,
@@ -231,7 +348,7 @@ function toTorrentResult(item) {
     leechers: Number(item.Leechers || 0),
     downloads: Number(item.Downloads || 0),
     size: item.SizeBytes || 0,
-    date: item.DateUploaded ? new Date(item.DateUploaded) : new Date(),
+    date: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : new Date(),
     accuracy: 'medium',
     tags,
     Tags: tags
@@ -322,8 +439,7 @@ function matchesQuery(title, query, searchContext, queryTitles) {
   }
 
   if (searchContext.mode === 'single') {
-    const verdict = classifyEpisode(title, searchContext.episode)
-    if (!titles.some(queryTitle => isPlausibleEpisode(title, searchContext.episode, queryTitle))) {
+    if (!isPlausibleEpisode(title, searchContext.episode)) {
       return false
     }
   }
@@ -349,7 +465,7 @@ function detectQuerySeason(titles) {
   return maxSeason
 }
 
-function isPlausibleEpisode(title, ep, queryTitle) {
+function isPlausibleEpisode(title, ep) {
   if (!ep) return true
   const verdict = classifyEpisode(title, ep)
   return verdict === 'exact'
@@ -367,7 +483,6 @@ function matchesResolution(title, resolution) {
 
 function hasAnyResolution(title) {
   return /\b(?:2160|1080|720|540|480)p\b/i.test(title)
-  
 }
 
 // Strip resolution / size / dimension / season noise so leftover digits
@@ -384,13 +499,21 @@ function stripEpisodeNoise(title) {
     .replace(/\b\d{1,2}(?:st|nd|rd|th)\s+[Ss]eason\b/gi, ' ')    // 2nd Season, 3rd Season
     .replace(/\b\d{1,2}(?:st|nd|rd|th)\b\s*(?=$)/gi, ' ')         // 3rd, 4th (trailing ordinal, no "Season")
     .replace(/\b(XXX?IX|XXX?IV|XXX?V?I{0,3}|XXI{0,3}|XIV|XIX|XL|XLIX|X{1,3}|IV|V|VI{0,3}|IX|I{1,3})\b\s*$/gi, ' ') // trailing roman numeral season
-    .replace(/(?:^|\s)0*(\d{1,2})\s*$/, ' ')                     // trailing bare season number (preceded by space, not dash)
+    .replace(/(?:^|\s)0*(\d{1,2})\s*$/, (match, _number, offset, source) => {
+      // Preserve a dash-separated episode such as "Show - 02".
+      return /[-–]\s*$/.test(source.slice(0, offset)) ? match : ' '
+    })
+    .replace(/\b0*(\d{1,2})\s+[-–]\s+(?=(?:E|EP)?\s*0*\d{1,4}\b)/gi, ' ')
 }
 
 const ROMAN_MAP = { I:1, II:2, III:3, IV:4, V:5, VI:6, VII:7, VIII:8, IX:9, X:10, XI:11, XII:12, XIII:13, XIV:14, XV:15, XVI:16, XVII:17, XVIII:18, XIX:19, XX:20, XXI:21, XXII:22, XXIII:23, XXIV:24, XXV:25, XXVI:26, XXVII:27, XXVIII:28, XXIX:29, XXX:30, XXXI:31, XXXII:32, XXXIII:33, XXXIV:34, XXXV:35, XXXVI:36, XXXVII:37, XXXVIII:38, XXXIX:39 }
 const ROMAN_RE = /\b(XXX?IX|XXX?IV|XXX?V?I{0,3}|XXI{0,3}|XIV|XIX|XL|XLIX|X{1,3}|IV|V|VI{0,3}|IX|I{1,3})\b/g
 
 function detectSeason(title) {
+  return detectSeasonInternal(title, true)
+}
+
+function detectSeasonInternal(title, allowTrailingBare) {
   const text = String(title)
   let m = text.match(/\b[Ss](?:eason)?\s*0*(\d{1,2})\b/)
   if (m) return Number(m[1])
@@ -412,8 +535,11 @@ function detectSeason(title) {
   }
   // Trailing bare number preceded by a space (not a dash) — "Show 4" → S4.
   // Requires a space before the number so "Show 4 - 10" doesn't match "10".
-  m = text.match(/(?:^|\s)0*(\d{1,2})\s*$/)
-  if (m) return Number(m[1])
+  // Reject if preceded by a dash (episode slot like "Show - 02").
+  if (allowTrailingBare) {
+    m = text.match(/(?:^|\s)0*(\d{1,2})\s*$/)
+    if (m && !/[-–]\s*\d{1,2}\s*$/.test(text)) return Number(m[1])
+  }
   return null
 }
 
@@ -422,7 +548,7 @@ function detectSeason(title) {
 // season 3; we only accept the bare number when an episode delimiter is
 // present so we don't misread the episode itself as a season.
 function detectResultSeason(title) {
-  const explicit = detectSeason(title)
+  const explicit = detectSeasonInternal(title, false)
   if (explicit != null) return explicit
   const text = String(title)
   // "Show <n> - <ep>" or "Show <n> E<ep>" or "Show <n> <ep>"
@@ -484,10 +610,17 @@ function classifyEpisode(title, ep) {
 }
 
 function matchesBatch(title, episodeCount) {
-  if (/\b(batch|complete|season|full|collection|pack|全集)\b/i.test(title)) return true
+  if (/\b(batch|complete|full|collection|pack|全集)\b/i.test(title)) return true
+
+  // A season-only title can describe a pack, but season notation plus an
+  // episode marker is an individual release unless stronger batch evidence
+  // appears below.
+  const hasSeasonMarker = /\b(?:\d+(?:st|nd|rd|th)\s+[Ss]eason|[Ss]eason\s*0?\d|[Ss]0?\d)\b/i.test(title)
+  const hasEpisodeMarker = /\b(?:S\d{1,2}E\d{1,4}|E[Pp]?\.?\s*\d{1,4})\b|[-–]\s*(?:E[Pp]?\.?\s*)?\d{1,4}\b/i.test(title)
+  if (hasSeasonMarker && !hasEpisodeMarker) return true
+
   // Any explicit season (S1, S2, ...) plus a range reads as a batch
   if (/\b[Ss](?:eason)?\s*0?\d\b/.test(title) && /\b0*\d{1,4}\s*[-~]\s*0*\d{1,4}\b/.test(title)) return true
-  if (/\bS0?1\b/i.test(title) || /\bSeason\s*0?1\b/i.test(title)) return true
 
   if (episodeCount) {
     const padded = String(episodeCount).padStart(2, '0')
@@ -529,7 +662,6 @@ function scoreResult(result, query, searchContext, queryTitles) {
   if (searchContext.mode === 'single' && searchContext.episode) {
     const verdict = classifyEpisode(result.title, searchContext.episode)
     if (verdict === 'exact') score += 30
-    else if (verdict === 'range') score += 12
     else if (verdict === 'conflict') score -= 30
     // season alignment bonus
     const rs = detectResultSeason(result.title)
