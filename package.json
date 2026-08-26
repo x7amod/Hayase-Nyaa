@@ -4,7 +4,6 @@
   "description": "Community-maintained Nyaa extension for Hayase.",
   "main": "index.json",
   "scripts": {
-    "generate": "node generate_indexes.js",
     "test": "node --test --test-reporter ./test/helpers/reporter.mjs test/unit/*.test.mjs",
     "test:unit": "node --test --test-reporter ./test/helpers/reporter.mjs test/unit/*.test.mjs",
     "test:integration": "node --test --test-reporter ./test/helpers/reporter.mjs test/integration/*.test.mjs",

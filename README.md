@@ -22,7 +22,6 @@ https://raw.githubusercontent.com/x7amod/Hayase-Nyaa/main/index.json
 npm test                # Run unit tests (offline, CI-safe)
 npm run test:integration # Run live Nyaa tests
 npm run test:all        # Run everything
-npm run generate        # Regenerate index.json manifests
 ```
 
 ### Project Structure
@@ -30,14 +29,14 @@ npm run generate        # Regenerate index.json manifests
 ```
 hayase/
   nyaasi.js       # Nyaa torrent source extension
-  index.json      # Generated Hayase manifest
+  index.json      # Hayase manifest
 test/
   unit/           # Offline unit tests (runs in CI)
   integration/    # Live network tests (skipped in CI)
   helpers/        # Shared test utilities
   fixtures/       # Test fixture data
 docs/
-  memory.md       # Project architecture and internals (AI Memory)
+  memory.md       # Current architecture and search behavior
 ```
 
 ### Adding a Test

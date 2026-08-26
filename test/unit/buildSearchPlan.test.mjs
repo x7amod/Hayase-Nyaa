@@ -1,8 +1,44 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
-import { getInternals } from '../helpers/loader.mjs'
+import { getExtension, getInternals } from '../helpers/loader.mjs'
 
-const { buildSearchPlan } = getInternals()
+const { buildSearchPlan, getSearchTitles } = getInternals()
+const Nyaa = getExtension()
+
+describe('getSearchTitles', () => {
+  it('uses preferred fields when building search requests', async () => {
+    const requested = []
+    await Nyaa.single({
+      media: { title: { romaji: 'Romaji Name', english: 'English Name', native: 'Native Name' } },
+      titles: ['Romaji Name', 'English Name', 'Native Name', 'Unrelated Synonym'],
+      episode: 1,
+      resolution: '',
+      exclusions: [],
+      fetch: async (url) => {
+        requested.push(decodeURIComponent(url))
+        return { ok: true, text: async () => '<rss></rss>' }
+      },
+    })
+
+    assert.ok(requested.some(url => url.includes('Romaji Name')))
+    assert.ok(requested.some(url => url.includes('English Name')))
+    assert.ok(requested.every(url => !url.includes('Native Name') && !url.includes('Unrelated Synonym')))
+  })
+
+  it('keeps Hayase season aliases for preferred titles', () => {
+    const titles = getSearchTitles({
+      media: { title: { romaji: 'Show Season 2', english: null } },
+      titles: ['Show Season 2', 'Show S2'],
+    })
+
+    assert.deepStrictEqual(titles, ['Show Season 2', 'Show S2'])
+  })
+
+  it('falls back to the supplied titles when preferred fields are unavailable', () => {
+    const titles = ['Fallback Name', 'Alternate Name']
+    assert.deepStrictEqual(getSearchTitles({ media: { title: { native: null } }, titles }), titles)
+  })
+})
 
 describe('buildSearchPlan', () => {
   describe('single mode', () => {

@@ -25,7 +25,8 @@ export default new class NyaaSi {
 
   async search(query, searchContext) {
     try {
-      const searchPlan = buildSearchPlan(query.titles, searchContext)
+      const searchTitles = getSearchTitles(query)
+      const searchPlan = buildSearchPlan(searchTitles, searchContext)
       if (!searchPlan.length) return []
 
       console.log('[NyaaSi] search plan:', searchPlan.map(e => e.term))
@@ -118,7 +119,6 @@ function buildSearchPlan(titles = [], searchContext = {}) {
   const cleanTitles = (titles || [])
     .filter(title => typeof title === 'string' && title.trim())
     .map(normalizeSearch)
-    .filter(title => title && !isPredominantlyJapanese(title))
     .filter(Boolean)
 
   // (1) base form of every title — both romaji and English always searched
@@ -206,15 +206,33 @@ function normalizeSearch(title) {
   return String(title).normalize('NFKC').replace(/\s+/g, ' ').trim()
 }
 
-// Returns true if the string is predominantly Japanese characters
-// (hiragana, katakana, kanji, Japanese punctuation). Allows a small
-// number of Latin characters (e.g. "S" in "Sランク") as long as the
-// text is mostly Japanese.
-function isPredominantlyJapanese(text) {
-  const cleaned = text.replace(/[\s\-_.:!?~'"()（）「」【】／＆]/g, '')
-  if (!cleaned) return false
-  const nonJapanese = cleaned.replace(/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3000-\u303F\uFF00-\uFFEF]/g, '')
-  return nonJapanese.length <= 2
+// Hayase's titles array also contains native-language titles and synonyms.
+// Prefer the explicit Romaji/English fields when they are available, while
+// retaining the generated season aliases Hayase normally adds to the array.
+function getSearchTitles(query = {}) {
+  const mediaTitles = query.media?.title ?? {}
+  const preferred = []
+  const seen = new Set()
+
+  const add = (title) => {
+    const normalized = normalizeSearch(title)
+    if (!normalized || seen.has(normalized.toLowerCase())) return
+    seen.add(normalized.toLowerCase())
+    preferred.push(normalized)
+  }
+
+  for (const title of [mediaTitles.romaji, mediaTitles.english]) {
+    if (typeof title !== 'string' || !title.trim()) continue
+    add(title)
+
+    const ordinal = title.match(/(\d{1,2})(?:st|nd|rd|th) Season/i)
+    const season = title.match(/Season (\d{1,2})/i)
+    if (season) add(title.replace(/Season \d{1,2}/i, `S${season[1]}`))
+    else if (ordinal) add(title.replace(/\d{1,2}(?:st|nd|rd|th) Season/i, `S${ordinal[1]}`))
+  }
+
+  if (preferred.length) return preferred
+  return Array.isArray(query.titles) ? query.titles : []
 }
 
 function stripQualifiers(title) {
