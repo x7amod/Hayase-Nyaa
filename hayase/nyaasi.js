@@ -618,7 +618,14 @@ function classifyEpisode(title, ep) {
   const slotRe = /(?:^|[\s_\-])[\-]\s*0*(\d{1,4})(?=[\s_\-)\]\.,]|$)/g
   while ((m = slotRe.exec(cleaned))) allNums.push(Number(m[1]))
   const standaloneRe = /(?:^|[\s_\-])0*(\d{1,3})(?=[\s_)\]\.,]|$)/g
-  while ((m = standaloneRe.exec(cleaned))) allNums.push(Number(m[1]))
+  while ((m = standaloneRe.exec(cleaned))) {
+    const numberEnd = standaloneRe.lastIndex
+    const nextNonSpace = cleaned.slice(numberEnd).match(/\S/)
+    // A number followed by a normal word is part of the show title, not an
+    // episode marker (for example, the "100" in "100 Girlfriends").
+    if (nextNonSpace && /[A-Za-z]/.test(nextNonSpace[0])) continue
+    allNums.push(Number(m[1]))
+  }
   // Detect multi-episode titles like "10 & 11" or "10, 11" — multiple distinct episode numbers
   if (allNums.length > 1) {
     const distinct = [...new Set(allNums)]

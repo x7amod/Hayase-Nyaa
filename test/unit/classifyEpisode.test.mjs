@@ -10,6 +10,16 @@ describe('classifyEpisode', () => {
       assert.strictEqual(classifyEpisode('[SubsPlease] Show - S01E12 (1080p)', 12), 'exact')
     })
 
+    it('ignores numbers embedded in the show title', () => {
+      assert.strictEqual(
+        classifyEpisode(
+          '[VARYG] The 100 Girlfriends Who Really Really Really Really REALLY Love You S03E05 1080p',
+          5
+        ),
+        'exact'
+      )
+    })
+
     it('returns exact for dash-separated episode', () => {
       assert.strictEqual(classifyEpisode('[SubsPlease] Sousou no Frieren - 12 (1080p) [A0234FCE].mkv', 12), 'exact')
     })
