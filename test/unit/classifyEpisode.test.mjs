@@ -60,8 +60,8 @@ describe('classifyEpisode', () => {
       assert.strictEqual(classifyEpisode('[Erai-raws] Show - 01 ~ 21 [1080p]', 10), 'conflict')
     })
 
-    it('returns exact for episode at range endpoint', () => {
-      assert.strictEqual(classifyEpisode('[SubsPlease] Show S2 (01-10) (1080p)', 1), 'exact')
+    it('returns range for episode at range endpoint (endpoint is still a batch)', () => {
+      assert.strictEqual(classifyEpisode('[SubsPlease] Show S2 (01-10) (1080p)', 1), 'range')
     })
   })
 

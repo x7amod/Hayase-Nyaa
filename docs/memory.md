@@ -4,6 +4,26 @@ This repository contains a single Hayase torrent extension for searching Nyaa.
 The extension is `hayase/nyaasi.js`. The two `index.json` files are published
 manifests and are maintained manually.
 
+## File Structure
+
+`hayase/nyaasi.js` is organized as:
+
+1. **0. Constants & shared regexes** — `RESOLUTIONS`, `RESOLUTION_P_RE`/`ANY_RESOLUTION_P_RE`,
+   `DIMENSION_RE`, `K_RE`, `BATCH_KEYWORD_RE`, `FIN_BRACKET_RE`, `SEASON_MARKER_RE`,
+   `EPISODE_MARKER_RE`, `BATCH_SEASON_RANGE_RE`, `RANGE_FRAGMENT_RE`, `ROMAN_RE`,
+   `SIZE_MULTIPLIERS`, plus `resolutionRegexCache`/`batchRangeRegexCache`.
+2. **1. Small utils** — `normalizeSearch`, `ordinalSuffix`, `makeDedupCollector`,
+   `makePlanCollector`, `preparedBase`, `hasSeasonMarker`, `hasEpisodeMarker`.
+3. **NyaaSi class** — `single`/`batch`/`movie`/`search`/`test` and `fetchSearchPlan`
+   with `MAX_CONCURRENT_SEARCHES = 2`.
+4. **Search plan** — `buildSearchPlan`, `getSearchTitles`, `stripQualifiers`,
+   `scanBalanced`/`removeBalancedGroups`, `buildSearchVariants`, etc.
+5. **Filtering** — `matchesQuery`, `detectQuerySeason`, `isPlausibleEpisode`,
+   `hasExcludedKeyword`, `matchesResolution`/`hasAnyResolution`, `stripEpisodeNoise`,
+   `detectSeason`/`detectResultSeason`, `classifyEpisode`, `matchesBatch`.
+6. **Ranking & parsing** — `dedupeResults`, `rankResults`/`scoreResult`,
+   `parseRssResults`/`decodeXmlEntities`, `parseSize`, `extractTags`.
+
 ## Search Flow
 
 The extension exposes three search methods:
@@ -17,7 +37,7 @@ Each search follows this flow:
 1. Select search titles with `getSearchTitles`.
 2. Build a deduplicated Nyaa RSS search plan.
 3. Fetch plan entries with at most two requests in flight.
-4. Parse RSS items into torrent results.
+4. Parse RSS items into torrent results (with XML entity decoding).
 5. Deduplicate results by hash, link, or title.
 6. Filter results by exclusions, resolution, season, and search mode.
 7. Rank the remaining results by title similarity, episode or batch match,
@@ -65,7 +85,7 @@ are generated to match common release naming differences:
 
 For `single` searches, each title also gets:
 
-- The requested episode number.
+- The requested episode number (supports `episode: 0` via `!= null` check).
 - A zero-padded episode number when different, such as `01`.
 - The requested resolution, such as `10 1080p`.
 - The same episode variants with `!` and `?` removed.
@@ -86,16 +106,37 @@ batch terms.
 
 Before ranking, results are rejected when:
 
-- The title contains an excluded keyword.
-- The result has a resolution that differs from the requested resolution.
+- The title contains an excluded keyword (empty strings in `exclusions` are ignored).
+- The result has a resolution that differs from the requested resolution. Any
+  `###p` (e.g. `1440p`), `###x###` dimension (height determines resolution,
+  stripped before bare-number check to avoid `720x1080` matching `720`), or
+  `*K` (e.g. `4K`) is detected via `ANY_RESOLUTION_P_RE`/`DIMENSION_RE`/`K_RE`.
 - The result has an explicitly conflicting season.
-- A single-episode result does not contain the exact requested episode.
-- A batch result does not look like a batch, complete release, season pack, or
-  matching episode range.
+- A single-episode result does not contain the exact requested episode
+  (`isPlausibleEpisode` uses `classifyEpisode === 'exact'`, with `episode == null`
+  check so `0` is handled). `classifyEpisode` treats any compact range
+  (`01-12`) as `range` even at endpoints, and multi-number titles (`10 & 11`)
+  with distinct episode numbers as `range`, so they are rejected in single mode.
+- A batch result does not look like a batch. `matchesBatch` reuses single's
+  `EPISODE_MARKER_RE` via `hasEpisodeMarker`: if `hasEpisodeMarker(title)` is true
+  and no `RANGE_FRAGMENT_RE` is present, the title is rejected as single-episode
+  (covers `EP10`, `S01E10` — dash ranges like `01-21` are allowed because they
+  contain a range fragment). Remaining batch signals are: `BATCH_KEYWORD_RE`
+  (`batch|complete|fin|全集` — `full`/`collection`/`pack` removed to avoid
+  `Full Metal Panic!` false positives), `FIN_BRACKET_RE`, season-only packs
+  (`hasSeasonMarker && !hasEpisodeMarker && classifyEpisode === 'absent'` so
+  `Season 3 01` is not misclassed), season+range, `1-21`/`01 ~ 21` range, or
+  title-only (`classifyEpisode === 'absent' && !hasEpisodeMarker`, guarded for
+  `episodeCount == null` vs `!= null` to keep `Title 1080p` while rejecting
+  `Show 01` when count is missing).
 
 In single mode, ranges and titles with no explicit episode marker are rejected
 even if they include the requested episode indirectly. This avoids returning
 season packs for an individual episode request.
+
+RSS titles are decoded via `decodeXmlEntities` (`&amp;`, `&lt;`, `&gt;`,
+`&quot;`, `&apos;`, `&#123;`, `&#xAB;`) after CDATA/tag stripping, and extracts
+are trimmed. `parseSize` and tagging remain as before.
 
 ## Repository Maintenance
 
