@@ -20,6 +20,16 @@ describe('classifyEpisode', () => {
       )
     })
 
+    it('ignores decimal audio-channel numbers', () => {
+      assert.strictEqual(
+        classifyEpisode(
+          '[AnoZu] The 100 Girlfriends Who Really Really Really Really REALLY Love You S03E05 1080p CR WEB-DL Dual-Audio DDP 2.0 H.264',
+          5
+        ),
+        'exact'
+      )
+    })
+
     it('returns exact for dash-separated episode', () => {
       assert.strictEqual(classifyEpisode('[SubsPlease] Sousou no Frieren - 12 (1080p) [A0234FCE].mkv', 12), 'exact')
     })

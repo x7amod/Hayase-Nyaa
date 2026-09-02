@@ -617,7 +617,7 @@ function classifyEpisode(title, ep) {
   while ((m = eRe.exec(cleaned))) allNums.push(Number(m[1]))
   const slotRe = /(?:^|[\s_\-])[\-]\s*0*(\d{1,4})(?=[\s_\-)\]\.,]|$)/g
   while ((m = slotRe.exec(cleaned))) allNums.push(Number(m[1]))
-  const standaloneRe = /(?:^|[\s_\-])0*(\d{1,3})(?=[\s_)\]\.,]|$)/g
+  const standaloneRe = /(?:^|[\s_\-])0*(\d{1,3})(?!\.\d)(?=[\s_)\]\.,]|$)/g
   while ((m = standaloneRe.exec(cleaned))) {
     const numberEnd = standaloneRe.lastIndex
     const nextNonSpace = cleaned.slice(numberEnd).match(/\S/)

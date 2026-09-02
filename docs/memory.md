@@ -152,3 +152,43 @@ npm test
 ```
 
 GitHub Actions runs the unit tests on Node.js 22 only.
+
+## Debugging Extensions With Chrome DevTools MCP
+
+Use this workflow when Hayase displays too few or no results from an
+extension:
+
+1. List open pages with `chrome-devtools_list_pages`, then select the Hayase
+   page with `chrome-devtools_select_page`.
+2. Take an accessibility snapshot with `chrome-devtools_take_snapshot` to
+   identify the current route, anime title, episode controls, resolution, and
+   result elements.
+3. Reproduce the problem from the UI. Navigate to the anime, select the
+   affected episode, and wait for the result list with
+   `chrome-devtools_wait_for`.
+4. Read extension diagnostics with
+   `chrome-devtools_list_console_messages`, including preserved messages. Use
+   `chrome-devtools_get_console_message` for individual entries so object and
+   array arguments are expanded. Extension logs commonly reveal search
+   inputs, generated queries, raw result counts, filtered result counts, and
+   final titles.
+5. Inspect `chrome-devtools_list_network_requests` and filter for the source
+   requests (`nyaa.si` here). Confirm every generated search request, HTTP
+   status, and whether requests are still pending or failed.
+6. Use `chrome-devtools_get_network_request` to save or inspect response
+   bodies for suspicious source searches. Compare the source RSS/API items
+   with the titles shown by Hayase. This distinguishes missing upstream data
+   from local parsing or filtering.
+7. Trace the count change through the extension logs and source code. For
+   this extension, the main stages are search-plan generation, RSS parsing,
+   hash/link deduplication, `matchesQuery()` filtering, and ranking.
+8. For a dropped candidate, check each predicate independently: exclusions,
+   resolution, season, and episode classification. Add a focused regression
+   test before changing a parser or filter.
+9. Reload or reproduce once after a change and verify both the Console counts
+   and the visible result titles. Also check for stale requests or logs from
+   an earlier anime before drawing conclusions.
+
+Useful evidence to record is the exact Hayase route, AniList ID, episode,
+resolution, console count transition, relevant request URLs/statuses, and the
+source title of at least one expected-but-missing result.
