@@ -1,30 +1,23 @@
-import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import sourceModule from '../../hayase/src/index.js'
+import * as sourceExports from '../../hayase/src/index.js'
+import bundleModule from '../../hayase/nyaasi.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(HERE, '../..')
+const BUNDLE_PATH = path.resolve(ROOT, 'hayase', 'nyaasi.js')
 
-const INTERNAL_FUNCTIONS = [
-  'classifyEpisode', 'detectSeason', 'detectResultSeason', 'detectQuerySeason',
-  'matchesBatch', 'matchesQuery', 'isPlausibleEpisode',
-  'buildSearchPlan', 'buildSearchVariants',
-  'fetchSearchPlan', 'fetchResults',
-  'getSearchTitles',
-  'stripEpisodeNoise', 'normalizeSearch', 'stripQualifiers',
-  'hasExcludedKeyword', 'hasAnyResolution', 'matchesResolution',
-  'rankResults', 'scoreResult', 'dedupeResults',
-  'parseRssResults', 'toTorrentResult', 'parseSize', 'extractTags',
-  'bestTitleSimilarity', 'bestMatchingQueryTitle',
-]
+function moduleWithDefault(moduleExports, defaultExport) {
+  return { ...moduleExports, NyaaSi: defaultExport }
+}
 
-export function loadExtension(file = path.join(ROOT, 'hayase', 'nyaasi.js')) {
-  const src = fs.readFileSync(file, 'utf8')
-  const modified = src.replace('export default new class NyaaSi {', 'const __NyaaSi = new class NyaaSi {')
-  const exportsList = INTERNAL_FUNCTIONS.join(', ')
-  const wrapper = `${modified}\nreturn { NyaaSi: __NyaaSi, ${exportsList} }`
-  const fn = new Function('module', 'fetch', wrapper)
-  return fn({ exports: {} }, globalThis.fetch)
+const SOURCE = moduleWithDefault(sourceExports, sourceModule)
+const BUNDLE = moduleWithDefault(sourceExports, bundleModule)
+const DEFAULT = process.env.HAYASE_TEST_BUNDLE === 'true' ? BUNDLE : SOURCE
+
+export function loadExtension(file) {
+  return file ? (path.resolve(file) === BUNDLE_PATH ? BUNDLE : SOURCE) : DEFAULT
 }
 
 export function getExtension(file) {

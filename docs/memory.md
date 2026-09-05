@@ -1,28 +1,29 @@
 # Hayase Nyaa Extension Memory
 
 This repository contains a single Hayase torrent extension for searching Nyaa.
-The extension is `hayase/nyaasi.js`. The two `index.json` files are published
-manifests and are maintained manually.
+The source is split under `hayase/src/`; `hayase/nyaasi.js` is the generated
+single-file worker artifact served by the manifest. The two `index.json` files
+are published manifests and are maintained manually.
 
 ## File Structure
 
-`hayase/nyaasi.js` is organized as:
+The source modules are organized as:
 
-1. **0. Constants & shared regexes** — `RESOLUTIONS`, `RESOLUTION_P_RE`/`ANY_RESOLUTION_P_RE`,
-   `DIMENSION_RE`, `K_RE`, `BATCH_KEYWORD_RE`, `FIN_BRACKET_RE`, `SEASON_MARKER_RE`,
-   `EPISODE_MARKER_RE`, `BATCH_SEASON_RANGE_RE`, `RANGE_FRAGMENT_RE`, `ROMAN_RE`,
-   `SIZE_MULTIPLIERS`, plus `resolutionRegexCache`/`batchRangeRegexCache`.
-2. **1. Small utils** — `normalizeSearch`, `ordinalSuffix`, `makeDedupCollector`,
-   `makePlanCollector`, `preparedBase`, `hasSeasonMarker`, `hasEpisodeMarker`.
-3. **NyaaSi class** — `single`/`batch`/`movie`/`search`/`test` and `fetchSearchPlan`
-   with `MAX_CONCURRENT_SEARCHES = 2`.
-4. **Search plan** — `buildSearchPlan`, `getSearchTitles`, `stripQualifiers`,
-   `scanBalanced`/`removeBalancedGroups`, `buildSearchVariants`, etc.
-5. **Filtering** — `matchesQuery`, `detectQuerySeason`, `isPlausibleEpisode`,
-   `hasExcludedKeyword`, `matchesResolution`/`hasAnyResolution`, `stripEpisodeNoise`,
-   `detectSeason`/`detectResultSeason`, `classifyEpisode`, `matchesBatch`.
-6. **Ranking & parsing** — `dedupeResults`, `rankResults`/`scoreResult`,
-   `parseRssResults`/`decodeXmlEntities`, `parseSize`, `extractTags`.
+1. **`src/constants.js`** — shared regexes, season map, caches, and concurrency settings.
+2. **`src/utils.js`** — normalization, dedupe collectors, base preparation, and shared title predicates.
+3. **`src/titles.js`** — media title selection, qualifier removal, and search-title variants.
+4. **`src/season.js`** — query/result season detection.
+5. **`src/episode.js`** — episode-noise stripping and episode classification.
+6. **`src/rss.js`** — Nyaa fetches, RSS parsing, XML decoding, and result conversion.
+7. **`src/plan.js`** — search-plan construction and concurrent budgeted fetching.
+8. **`src/filter.js`** — exclusions, resolution, season, episode, and batch predicates.
+9. **`src/rank.js`** — result dedupe, title similarity, scoring, and ranking.
+10. **`src/index.js`** — the `NyaaSi` public class and module exports.
+
+`hayase/nyaasi.js` must remain a bundled single-file artifact because the
+manifest loads it directly in Hayase's worker. `npm run build` bundles the
+small `src/runtime.js` entry and minifies the result; edit `hayase/src/` rather
+than the generated file.
 
 ## Search Flow
 
@@ -172,6 +173,18 @@ Run the offline test suite with:
 
 ```bash
 npm test
+```
+
+Regenerate the published worker after source changes with:
+
+```bash
+npm run build
+```
+
+Run all tests, including live Nyaa integration tests, with:
+
+```bash
+npm run test:all
 ```
 
 GitHub Actions runs the unit tests on Node.js 22 only.

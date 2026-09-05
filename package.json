@@ -4,6 +4,7 @@
   "description": "Community-maintained Nyaa extension for Hayase.",
   "main": "index.json",
   "scripts": {
+    "build": "node scripts/build.mjs",
     "test": "node --test --test-reporter ./test/helpers/reporter.mjs test/unit/*.test.mjs",
     "test:unit": "node --test --test-reporter ./test/helpers/reporter.mjs test/unit/*.test.mjs",
     "test:integration": "node --test --test-reporter ./test/helpers/reporter.mjs test/integration/*.test.mjs",
@@ -11,5 +12,8 @@
   },
   "author": "x7amod",
   "license": "GPL-3.0",
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
 }

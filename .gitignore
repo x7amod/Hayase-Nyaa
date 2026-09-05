@@ -1,4 +1,5 @@
 .vercel
 *.ansi
 .vscode/
+node_modules/
 test/fixtures/rss/
