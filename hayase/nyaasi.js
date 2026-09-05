@@ -13,6 +13,16 @@ const EPISODE_MARKER_RE = /\b(?:S\d{1,2}E\d{1,4}|E[Pp]?\.?\s*\d{1,4})\b|[-–]\s
 const BATCH_SEASON_RANGE_RE = /\b[Ss](?:eason)?\s*0?\d\b/
 const RANGE_FRAGMENT_RE = /\b0*\d{1,4}\s*[-~]\s*0*\d{1,4}\b/
 const ROMAN_RE = /\b(XXX?IX|XXX?IV|XXX?V?I{0,3}|XXI{0,3}|XIV|XIX|XL|XLIX|X{1,3}|IV|V|VI{0,3}|IX|I{1,3})\b/g
+const CLASSIFY_RANGE_RE = /\b0*(\d{1,4})(?:[-~]|to)0*(\d{1,4})(?=\D|$)/gi
+const CLASSIFY_EP_RE = /\b(?:S\d{1,2})?[Ee][Pp]?\.?\s*0*(\d{1,4})\b/g
+const CLASSIFY_SLOT_RE = /(?:^|[\s_\-])[-]\s*0*(\d{1,4})(?=[\s_\-)\]\.,]|$)/g
+const CLASSIFY_STANDALONE_RE = /(?:^|[\s_\-])0*(\d{1,3})(?!\.\d)(?=[\s_)\]\.,]|$)/g
+const RESULT_SEASON_RE = /\b0*(\d{1,2})(?:\s*[-–]\s*(?:E|EP)?\s*\d|\s+E\d|\s+S\d{1,2}E\d)/i
+const TRAILING_NUMBER_RE = /(?:^|\s)0*(\d{1,2})\s*$/
+const TRAILING_EPISODE_RE = /[-–]\s*\d{1,2}\s*$/
+const SEASON_S_RE = /\b[Ss](?:eason)?\s*0*(\d{1,2})\b/
+const SEASON_ORDINAL_RE = /\b(\d{1,2})(?:st|nd|rd|th)\s+[Ss]eason\b/
+const TRAILING_ORDINAL_RE = /\b(\d{1,2})(?:st|nd|rd|th)\b\s*$/
 const SIZE_MULTIPLIERS = { KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12, KIB: 1024, MIB: 1048576, GIB: 1073741824, TIB: 1099511627776 }
 
 const resolutionRegexCache = new Map()
@@ -115,10 +125,11 @@ export default new class NyaaSi {
 
       console.log('[NyaaSi] raw results:', results.length)
 
-      const filtered = results.filter(result => matchesQuery(result.title, query, searchContext, queryTitles))
+      const resultContext = { ...searchContext, querySeason: detectQuerySeason(queryTitles), resultCache: new Map() }
+      const filtered = results.filter(result => matchesQuery(result.title, query, resultContext, queryTitles))
       console.log('[NyaaSi] after filter:', filtered.length)
 
-      const ranked = rankResults(filtered, query, searchContext, queryTitles)
+      const ranked = rankResults(filtered, query, resultContext, queryTitles)
       console.log('[NyaaSi] final results:', ranked.map(r => {
         const ep = r.title.match(/[-\s](\d{1,3})\s|E(\d{1,3})|S\d+E(\d{1,3})/i)
         const epNum = ep ? (ep[1] || ep[2] || ep[3]) : '??'
@@ -196,13 +207,16 @@ function buildSearchPlan(titles = [], searchContext = {}) {
 
     for (const base of cleanTitles) {
       const { stripped, clean, needsClean } = preparedBase(base)
-      add(`${stripped} ${ep}`, stripped)
-      if (padded !== String(ep)) add(`${stripped} ${padded}`, stripped)
-      if (res) add(`${stripped} ${ep} ${res}p`, stripped)
-      if (needsClean) {
-        add(`${clean} ${ep}`, clean)
-        if (padded !== String(ep)) add(`${clean} ${padded}`, clean)
-        if (res) add(`${clean} ${ep} ${res}p`, clean)
+      if (res) {
+        add(`${stripped} ${ep} ${res}p`, stripped)
+        if (needsClean) add(`${clean} ${ep} ${res}p`, clean)
+      } else {
+        add(`${stripped} ${ep}`, stripped)
+        if (padded !== String(ep)) add(`${stripped} ${padded}`, stripped)
+        if (needsClean) {
+          add(`${clean} ${ep}`, clean)
+          if (padded !== String(ep)) add(`${clean} ${padded}`, clean)
+        }
       }
     }
 
@@ -237,6 +251,23 @@ function buildSearchPlan(titles = [], searchContext = {}) {
         add(`${clean} 1 ~ ${epCount}`, clean)
       }
     }
+    const season = detectQuerySeason(cleanTitles)
+    if (season) {
+      const sfx = ordinalSuffix(season)
+      for (const base of cleanTitles) {
+        const { clean } = preparedBase(base)
+        const ordinalBase = clean.replace(new RegExp(`\\s+0*${season}\\s*$`), '') || clean
+        add(`${ordinalBase} ${season}${sfx} Season batch`, ordinalBase)
+        add(`${ordinalBase} ${season}${sfx} Season complete`, ordinalBase)
+        add(`${ordinalBase} ${season}${sfx} Season season`, ordinalBase)
+        if (epCount) {
+          add(`${ordinalBase} ${season}${sfx} Season 1-${epCount}`, ordinalBase)
+          add(`${ordinalBase} ${season}${sfx} Season 01-${padded}`, ordinalBase)
+          add(`${ordinalBase} ${season}${sfx} Season 01 ~ ${padded}`, ordinalBase)
+          add(`${ordinalBase} ${season}${sfx} Season 1 ~ ${epCount}`, ordinalBase)
+        }
+      }
+    }
   }
 
   return plan
@@ -258,6 +289,23 @@ function getSearchTitles(query = {}) {
     const season = title.match(/Season (\d{1,2})/i)
     if (season) push(title.replace(/Season \d{1,2}/i, `S${season[1]}`))
     else if (ordinal) push(title.replace(/\d{1,2}(?:st|nd|rd|th) Season/i, `S${ordinal[1]}`))
+  }
+
+  // Use interface-master's grouping method: Object.values(media.title) + media.synonyms filtered by length > 3
+  // Keep only romaji/english + synonyms (exclude native explicitly, not via regex)
+  const groupedSynonyms = Array.isArray(query.media?.synonyms) ? query.media.synonyms : []
+  const hyphenlessTitles = [mediaTitles.romaji, mediaTitles.english]
+    .filter(Boolean)
+    .map(orig => [orig.replaceAll('-', ''), orig.replaceAll('-', ' ')])
+  for (const title of groupedSynonyms) {
+    if (typeof title !== 'string' || title.trim().length <= 3) continue
+    if (title === mediaTitles.native) continue
+    if (title === mediaTitles.romaji || title === mediaTitles.english) continue
+    // Drop hyphen-less duplicates that interface-master generates via t.replaceAll('-','')
+    // Check via direct string method, not regex
+    const isHyphenlessDupe = hyphenlessTitles.some(([withoutHyphens, withSpaces]) => withoutHyphens === title || withSpaces === title)
+    if (isHyphenlessDupe) continue
+    push(title)
   }
 
   if (preferred.length) return preferred
@@ -456,20 +504,22 @@ function decodeURIComponentSafe(value = '') {
 // ── Filtering ──────────────────────────────────────────────────────────────
 function matchesQuery(title, query, searchContext, queryTitles) {
   if (hasExcludedKeyword(title, query?.exclusions)) return false
+  const metadata = resultMetadata(title, query, searchContext)
   const titles = Array.isArray(queryTitles) ? queryTitles : [queryTitles]
-  if (query?.resolution && hasAnyResolution(title) && !matchesResolution(title, query.resolution)) return false
+  if (query?.resolution && metadata && metadata.hasResolution && !metadata.resolution) return false
+  if (query?.resolution && !metadata && hasAnyResolution(title) && !matchesResolution(title, query.resolution)) return false
   if (searchContext.mode !== 'movie') {
-    const querySeason = detectQuerySeason(titles)
+    const querySeason = searchContext.querySeason !== undefined ? searchContext.querySeason : detectQuerySeason(titles)
     if (querySeason) {
-      const resultSeason = detectResultSeason(title)
+      const resultSeason = metadata ? metadata.resultSeason : detectResultSeason(title)
       if (resultSeason && resultSeason !== querySeason) return false
     }
   }
   if (searchContext.mode === 'single') {
-    if (!isPlausibleEpisode(title, searchContext.episode)) return false
+    if (searchContext.episode != null && (metadata ? metadata.episode !== 'exact' : !isPlausibleEpisode(title, searchContext.episode))) return false
   }
   if (searchContext.mode === 'batch') {
-    if (!matchesBatch(title, searchContext.episodeCount)) return false
+    if (metadata ? !metadata.batch : !matchesBatch(title, searchContext.episodeCount)) return false
   }
   return true
 }
@@ -486,6 +536,24 @@ function detectQuerySeason(titles) {
 function isPlausibleEpisode(title, ep) {
   if (ep == null) return true
   return classifyEpisode(title, ep) === 'exact'
+}
+
+function resultMetadata(title, query, searchContext) {
+  const cache = searchContext.resultCache
+  if (!cache) return null
+  let metadata = cache.get(title)
+  if (!metadata) {
+    metadata = { title }
+    cache.set(title, metadata)
+  }
+  if (query?.resolution && metadata.resolution === undefined) {
+    metadata.hasResolution = hasAnyResolution(title)
+    metadata.resolution = matchesResolution(title, query.resolution)
+  }
+  if (searchContext.mode !== 'movie' && metadata.resultSeason === undefined) metadata.resultSeason = detectResultSeason(title)
+  if (searchContext.mode === 'single' && searchContext.episode != null && metadata.episode === undefined) metadata.episode = classifyEpisode(title, searchContext.episode)
+  if (searchContext.mode === 'batch' && metadata.batch === undefined) metadata.batch = matchesBatch(title, searchContext.episodeCount)
+  return metadata
 }
 
 function hasExcludedKeyword(title, exclusions = []) {
@@ -553,11 +621,11 @@ function detectSeason(title) {
 
 function detectSeasonInternal(title, allowTrailingBare) {
   const text = String(title)
-  let m = text.match(/\b[Ss](?:eason)?\s*0*(\d{1,2})\b/)
+  let m = SEASON_S_RE.exec(text)
   if (m) return Number(m[1])
-  m = text.match(/\b(\d{1,2})(?:st|nd|rd|th)\s+[Ss]eason\b/)
+  m = SEASON_ORDINAL_RE.exec(text)
   if (m) return Number(m[1])
-  m = text.match(/\b(\d{1,2})(?:st|nd|rd|th)\b\s*$/)
+  m = TRAILING_ORDINAL_RE.exec(text)
   if (m) return Number(m[1])
   ROMAN_RE.lastIndex = 0
   while ((m = ROMAN_RE.exec(text))) {
@@ -572,8 +640,8 @@ function detectSeasonInternal(title, allowTrailingBare) {
     }
   }
   if (allowTrailingBare) {
-    m = text.match(/(?:^|\s)0*(\d{1,2})\s*$/)
-    if (m && !/[-–]\s*\d{1,2}\s*$/.test(text)) return Number(m[1])
+    m = TRAILING_NUMBER_RE.exec(text)
+    if (m && !TRAILING_EPISODE_RE.test(text)) return Number(m[1])
   }
   return null
 }
@@ -582,7 +650,7 @@ function detectResultSeason(title) {
   const explicit = detectSeasonInternal(title, false)
   if (explicit != null) return explicit
   const text = String(title)
-  const m = text.match(/\b0*(\d{1,2})(?:\s*[-–]\s*(?:E|EP)?\s*\d|\s+E\d|\s+S\d{1,2}E\d)/i)
+  const m = RESULT_SEASON_RE.exec(text)
   if (m) {
     const candidate = Number(m[1])
     if (candidate >= 1 && candidate <= 99) return candidate
@@ -595,11 +663,10 @@ function classifyEpisode(title, ep) {
   const cleaned = stripEpisodeNoise(title)
   const epNum = Number(ep)
   // Any compact range in the title means this is a batch/multi-episode release, not a single
-  const rangeRe = /\b0*(\d{1,4})(?:[-~]|to)0*(\d{1,4})(?=\D|$)/gi
   let rm
   const hasRange = (() => {
-    rangeRe.lastIndex = 0
-    while ((rm = rangeRe.exec(cleaned))) {
+    CLASSIFY_RANGE_RE.lastIndex = 0
+    while ((rm = CLASSIFY_RANGE_RE.exec(cleaned))) {
       const lo = Math.min(Number(rm[1]), Number(rm[2]))
       const hi = Math.max(Number(rm[1]), Number(rm[2]))
       // Range that includes or equals the requested episode -> definitely a range release
@@ -613,17 +680,19 @@ function classifyEpisode(title, ep) {
   if (hasRange) return 'range'
   const allNums = []
   let m
-  const eRe = /\b(?:S\d{1,2})?[Ee][Pp]?\.?\s*0*(\d{1,4})\b/g
-  while ((m = eRe.exec(cleaned))) allNums.push(Number(m[1]))
-  const slotRe = /(?:^|[\s_\-])[\-]\s*0*(\d{1,4})(?=[\s_\-)\]\.,]|$)/g
-  while ((m = slotRe.exec(cleaned))) allNums.push(Number(m[1]))
-  const standaloneRe = /(?:^|[\s_\-])0*(\d{1,3})(?!\.\d)(?=[\s_)\]\.,]|$)/g
-  while ((m = standaloneRe.exec(cleaned))) {
-    const numberEnd = standaloneRe.lastIndex
-    const nextNonSpace = cleaned.slice(numberEnd).match(/\S/)
+  CLASSIFY_EP_RE.lastIndex = 0
+  while ((m = CLASSIFY_EP_RE.exec(cleaned))) allNums.push(Number(m[1]))
+  CLASSIFY_SLOT_RE.lastIndex = 0
+  while ((m = CLASSIFY_SLOT_RE.exec(cleaned))) allNums.push(Number(m[1]))
+  CLASSIFY_STANDALONE_RE.lastIndex = 0
+  while ((m = CLASSIFY_STANDALONE_RE.exec(cleaned))) {
+    const numberEnd = CLASSIFY_STANDALONE_RE.lastIndex
+    let next = numberEnd
+    while (next < cleaned.length && /\s/.test(cleaned[next])) next++
+    const nextChar = cleaned[next]
     // A number followed by a normal word is part of the show title, not an
     // episode marker (for example, the "100" in "100 Girlfriends").
-    if (nextNonSpace && /[A-Za-z]/.test(nextNonSpace[0])) continue
+    if (nextChar && /[A-Za-z]/.test(nextChar)) continue
     allNums.push(Number(m[1]))
   }
   // Detect multi-episode titles like "10 & 11" or "10, 11" — multiple distinct episode numbers
@@ -681,29 +750,35 @@ function dedupeResults(results) {
 }
 
 function rankResults(results, query, searchContext, queryTitles) {
+  const titles = Array.isArray(queryTitles) ? queryTitles : [queryTitles]
+  const rankingContext = searchContext.queryWordSets
+    ? searchContext
+    : { ...searchContext, queryWordSets: titles.map(wordSet) }
   return results
-    .map(result => ({ ...result, _score: scoreResult(result, query, searchContext, queryTitles) }))
+    .map(result => ({ ...result, _score: scoreResult(result, query, rankingContext, queryTitles) }))
     .sort((a, b) => b._score - a._score || b.seeders - a.seeders)
     .map(({ _score, ...result }) => result)
 }
 
 function scoreResult(result, query, searchContext, queryTitles) {
   let score = 0
-  const similarity = bestTitleSimilarity(queryTitles, result.title)
+  const similarity = bestTitleSimilarity(queryTitles, result.title, searchContext.queryWordSets)
   if (similarity > 0.7) score += 40
   else if (similarity > 0.4) score += 12
   else score -= 15
   if (searchContext.mode === 'single' && searchContext.episode != null) {
-    const verdict = classifyEpisode(result.title, searchContext.episode)
+    const metadata = resultMetadata(result.title, query, searchContext)
+    const verdict = metadata ? metadata.episode : classifyEpisode(result.title, searchContext.episode)
     if (verdict === 'exact') score += 30
     else if (verdict === 'conflict') score -= 30
-    const rs = detectResultSeason(result.title)
-    const qs = detectQuerySeason(Array.isArray(queryTitles) ? queryTitles : [queryTitles])
+    const rs = metadata ? metadata.resultSeason : detectResultSeason(result.title)
+    const qs = searchContext.querySeason !== undefined ? searchContext.querySeason : detectQuerySeason(Array.isArray(queryTitles) ? queryTitles : [queryTitles])
     if (rs && qs && rs === qs) score += 8
   }
-  if (searchContext.mode === 'batch' && matchesBatch(result.title, searchContext.episodeCount)) score += 30
-  if (matchesResolution(result.title, query?.resolution)) score += 15
-  else if (query?.resolution && hasAnyResolution(result.title)) score -= 5
+  const metadata = resultMetadata(result.title, query, searchContext)
+  if (searchContext.mode === 'batch' && (metadata ? metadata.batch : matchesBatch(result.title, searchContext.episodeCount))) score += 30
+  if (query?.resolution ? (metadata ? metadata.resolution : matchesResolution(result.title, query.resolution)) : true) score += 15
+  else if (query?.resolution && (metadata ? metadata.hasResolution : hasAnyResolution(result.title))) score -= 5
   if (/\b(batch|complete|season|s\d{1,2})\b/i.test(result.title)) score += searchContext.mode === 'batch' ? 10 : -10
   score += Math.min(result.seeders || 0, 100) / 10
   return score
@@ -720,10 +795,17 @@ function bestMatchingQueryTitle(queryTitles, resultTitle) {
   return bestTitle
 }
 
-function bestTitleSimilarity(queryTitles, resultTitle) {
+function bestTitleSimilarity(queryTitles, resultTitle, preparedQueryWords) {
   const titles = Array.isArray(queryTitles) ? queryTitles : [queryTitles]
+  const queryWords = preparedQueryWords || titles.map(wordSet)
+  const resultWords = wordSet(resultTitle)
   let best = 0
-  for (const title of titles) best = Math.max(best, titleSimilarity(title, resultTitle))
+  for (const words of queryWords) {
+    if (!words.size) continue
+    let matches = 0
+    for (const word of words) if (resultWords.has(word)) matches++
+    best = Math.max(best, matches / words.size)
+  }
   return best
 }
 
