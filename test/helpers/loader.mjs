@@ -9,6 +9,7 @@ const INTERNAL_FUNCTIONS = [
   'classifyEpisode', 'detectSeason', 'detectResultSeason', 'detectQuerySeason',
   'matchesBatch', 'matchesQuery', 'isPlausibleEpisode',
   'buildSearchPlan', 'buildSearchVariants',
+  'fetchSearchPlan', 'fetchResults',
   'getSearchTitles',
   'stripEpisodeNoise', 'normalizeSearch', 'stripQualifiers',
   'hasExcludedKeyword', 'hasAnyResolution', 'matchesResolution',

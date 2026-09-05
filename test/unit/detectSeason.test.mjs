@@ -24,6 +24,13 @@ describe('detectSeason', () => {
     it('detects IV', () => assert.strictEqual(detectSeason('Show IV'), 4))
     it('detects III', () => assert.strictEqual(detectSeason('Show III'), 3))
     it('detects II', () => assert.strictEqual(detectSeason('Show II'), 2))
+    it('detects trailing single V as season 5', () => assert.strictEqual(detectSeason('Show V'), 5))
+    it('ignores the English pronoun I mid-title', () => {
+      assert.strictEqual(detectSeason('I Became a Legend After My 10 Year-Long Last Stand'), null)
+    })
+    it('ignores a standalone I inside an English title', () => {
+      assert.strictEqual(detectSeason('I Made Friends with the Second Prettiest Girl in My Class'), null)
+    })
   })
 
   describe('trailing bare number', () => {

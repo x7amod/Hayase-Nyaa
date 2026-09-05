@@ -37,6 +37,27 @@ describe('matchesQuery — episode filtering', () => {
     ])
     assert.strictEqual(results.length, 0)
   })
+
+  it('keeps an S2 release for a query titled with roman-numeral II', async () => {
+    const results = await searchSingle(
+      ['Gaikotsu Kishi-sama, Tadaima Isekai e Odekakechuu II', 'Skeleton Knight in Another World S2'],
+      1,
+      '1080',
+      ['[SubsPlease] Gaikotsu Kishi-sama, Tadaima Isekai e Odekakechuu S2 - 01 (1080p) [FEA68C8C].mkv']
+    )
+    assert.strictEqual(results.length, 1)
+  })
+
+  it('rejects a release whose parenthetical season conflicts with an Sxx marker', async () => {
+    // VARYG copy-paste error: S03E05 main title with a "2nd Season" parenthetical.
+    const results = await searchSingle(
+      ['Kimi no Koto ga Dai Dai Dai Dai Daisuki na 100-nin no Kanojo 3rd Season'],
+      5,
+      '1080',
+      ['The 100 Girlfriends Who Really Really Really Really REALLY Love You S03E05 1080p CR WEB-DL AAC2.0 H.264-VARYG (Kimi no Koto ga Daidaidaidaidaisuki na 100-nin no Kanojo 2nd Season, Multi-Subs)']
+    )
+    assert.strictEqual(results.length, 0)
+  })
 })
 
 describe('matchesQuery — resolution filtering', () => {

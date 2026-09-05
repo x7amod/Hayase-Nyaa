@@ -75,6 +75,37 @@ function hasSeasonMarker(title) {
   return SEASON_MARKER_RE.test(title)
 }
 
+// Punctuation-only duplicates of an already kept title. Release namings
+// keep or drop punctuation consistently per group, and the canonical form
+// plus short aliases already cover both shapes; the dupes only cost
+// requests against the extension time budget.
+function dropPunctuationDupes(titles) {
+  const seen = new Set()
+  return titles.filter(title => {
+    const key = String(title).toLowerCase().replace(/[^a-z0-9]/g, '')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+// Titles searchable on Nyaa's Latin-script index: romaji, english, and
+// abbreviation-like aliases. Native-script and other non-Latin synonyms
+// never match release titles and only bloat the plan toward the
+// extension time budget.
+function isLatinSearchTitle(title) {
+  return !/[^\u0000-\u024F\u1E00-\u1EFF\u2000-\u206F\u2190-\u21FF]/.test(String(title))
+}
+
+// Abbreviation-like alias: a short single Latin token, the shape release
+// groups use as shorthand titles. Longer or multi-word synonyms are
+// alternate full titles, not shorthands.
+function isShortAlias(title) {
+  if (typeof title !== 'string') return false
+  const text = title.trim()
+  return text.length > 3 && text.length <= 16 && !/\s/.test(text) && isLatinSearchTitle(text)
+}
+
 function hasEpisodeMarker(title) {
   // Reset is not needed for non-global regex, but keep helper single-source
   return EPISODE_MARKER_RE.test(title)
@@ -118,7 +149,7 @@ export default new class NyaaSi {
 
       const outcomes = await fetchSearchPlan(fetcher, this.base, searchPlan)
       for (const outcome of outcomes) {
-        if (outcome.status === 'fulfilled') {
+        if (outcome && outcome.status === 'fulfilled') {
           results = dedupeResults(results.concat(outcome.value.map(toTorrentResult)))
         }
       }
@@ -153,12 +184,18 @@ export default new class NyaaSi {
   }
 }()
 
-async function fetchSearchPlan(fetcher, base, searchPlan) {
+// Hayase drops the whole search when the extension takes too long, which
+// used to surface as zero results. Race the plan against a fetch budget
+// instead: terms are ordered most-selective-first, so whatever arrived in
+// time is the likeliest material. Individual term failures are still
+// ignored.
+async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000) {
   const outcomes = new Array(searchPlan.length)
   let nextIndex = 0
+  let stopped = false
 
   const worker = async () => {
-    while (nextIndex < searchPlan.length) {
+    while (nextIndex < searchPlan.length && !stopped) {
       const index = nextIndex++
       const { term } = searchPlan[index]
       try {
@@ -173,19 +210,34 @@ async function fetchSearchPlan(fetcher, base, searchPlan) {
   }
 
   const workerCount = Math.min(MAX_CONCURRENT_SEARCHES, searchPlan.length)
-  await Promise.all(Array.from({ length: workerCount }, worker))
+  // Unref so the budget never holds the host open after the work is done
+  // (browser timers lack unref, hence the guard).
+  let timer
+  try {
+    await Promise.race([
+      Promise.all(Array.from({ length: workerCount }, worker)),
+      new Promise(resolve => {
+        timer = setTimeout(() => { stopped = true; resolve() }, budgetMs)
+        if (timer && typeof timer.unref === 'function') timer.unref()
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
   return outcomes
 }
 
 // ── Search plan ────────────────────────────────────────────────────────────
 // Rules:
-//   1. Base form of every supplied title is always searched — this already
-//      covers plain title-only torrents like "Gosick 1080p BD".
-//   2. Stripped variants (trailing (...) / [...]) are added.
-//   3. Single mode: episode-qualified terms per title.
-//   4. Single mode + season detected: S04 / Season 4 / 4th Season variants.
+//   1. Single mode: episode-qualified terms per title (most selective first,
+//      so a time-budget cut keeps the likeliest hits).
+//   2. Single mode + season detected: de-seasoned Sxx / Season X / ordinal
+//      variants plus glued SxxEyy tokens.
+//   3. Base form of every supplied title is always searched — this already
+//      covers plain title-only torrents.
+//   4. Stripped variants (trailing (...) / [...]) and short phrases are added.
 //   5. Batch mode: batch/complete/season + range variants. Plain title is
-//      already covered by (1), range/season terms are supplemental.
+//      already covered by (3), range/season terms are supplemental.
 function buildSearchPlan(titles = [], searchContext = {}) {
   const { plan, add } = makePlanCollector()
 
@@ -193,12 +245,6 @@ function buildSearchPlan(titles = [], searchContext = {}) {
     .filter(title => typeof title === 'string' && title.trim())
     .map(normalizeSearch)
     .filter(Boolean)
-
-  for (const base of cleanTitles) add(base, base)
-
-  for (const base of cleanTitles) {
-    for (const variant of buildSearchVariants(base)) add(variant, base)
-  }
 
   if (searchContext.mode === 'single' && searchContext.episode != null) {
     const ep = searchContext.episode
@@ -223,15 +269,32 @@ function buildSearchPlan(titles = [], searchContext = {}) {
     const season = detectQuerySeason(cleanTitles)
     if (season) {
       const sfx = ordinalSuffix(season)
+      const paddedSeason = String(season).padStart(2, '0')
+      const paddedEpisode = String(searchContext.episode).padStart(2, '0')
       for (const base of cleanTitles) {
         const { stripped, clean } = preparedBase(base)
+        // Strip this base's own season marker first: releases use one
+        // notation, never the query's plus another (a term demanding both
+        // matches nothing).
+        const seasonless = stripTrailingSeasonMarker(clean, season)
         // Use clean base so Nyaa AND-search matches groups omitting !/?
-        add(`${clean} S${String(season).padStart(2, '0')} ${searchContext.episode}`, clean)
-        add(`${clean} Season ${season} ${searchContext.episode}`, clean)
-        const ordinalBase = clean.replace(new RegExp(`\\s+0*${season}\\s*$`), '') || clean
-        add(`${ordinalBase} ${season}${sfx} Season ${searchContext.episode}`, ordinalBase)
+        add(`${seasonless} S${paddedSeason} ${searchContext.episode}`, clean)
+        add(`${seasonless} S${season} ${searchContext.episode}`, clean)
+        add(`${seasonless} Season ${season} ${searchContext.episode}`, clean)
+        add(`${seasonless} ${season}${sfx} Season ${searchContext.episode}`, seasonless)
+        // Glued episode token: a spaced episode number can also match digits
+        // inside unrelated tokens, so page one fills with other episodes and
+        // the wanted one is buried. The glued token isolates it.
+        add(`${seasonless} S${paddedSeason}E${paddedEpisode}`, clean)
+        add(`${seasonless} S${season}E${paddedEpisode}`, clean)
       }
     }
+  }
+
+  for (const base of cleanTitles) add(base, base)
+
+  for (const base of cleanTitles) {
+    for (const variant of buildSearchVariants(base)) add(variant, base)
   }
 
   if (searchContext.mode === 'batch') {
@@ -256,7 +319,7 @@ function buildSearchPlan(titles = [], searchContext = {}) {
       const sfx = ordinalSuffix(season)
       for (const base of cleanTitles) {
         const { clean } = preparedBase(base)
-        const ordinalBase = clean.replace(new RegExp(`\\s+0*${season}\\s*$`), '') || clean
+        const ordinalBase = stripTrailingSeasonMarker(clean, season) || clean
         add(`${ordinalBase} ${season}${sfx} Season batch`, ordinalBase)
         add(`${ordinalBase} ${season}${sfx} Season complete`, ordinalBase)
         add(`${ordinalBase} ${season}${sfx} Season season`, ordinalBase)
@@ -291,25 +354,26 @@ function getSearchTitles(query = {}) {
     else if (ordinal) push(title.replace(/\d{1,2}(?:st|nd|rd|th) Season/i, `S${ordinal[1]}`))
   }
 
-  // Use interface-master's grouping method: Object.values(media.title) + media.synonyms filtered by length > 3
-  // Keep only romaji/english + synonyms (exclude native explicitly, not via regex)
-  const groupedSynonyms = Array.isArray(query.media?.synonyms) ? query.media.synonyms : []
-  const hyphenlessTitles = [mediaTitles.romaji, mediaTitles.english]
-    .filter(Boolean)
-    .map(orig => [orig.replaceAll('-', ''), orig.replaceAll('-', ' ')])
-  for (const title of groupedSynonyms) {
-    if (typeof title !== 'string' || title.trim().length <= 3) continue
-    if (title === mediaTitles.native) continue
+  // Only romaji + english (+ season aliases above) plus short single-token
+  // aliases are searched. Releases are often titled with the shorthand,
+  // which full titles can never AND-match; longer synonyms are alternate
+  // full titles that only multiply the plan toward the extension timeout.
+  // Everything else in query.titles is never used.
+  const synonyms = Array.isArray(query.media?.synonyms) ? query.media.synonyms : []
+  for (const title of synonyms) {
+    if (!isShortAlias(title)) continue
     if (title === mediaTitles.romaji || title === mediaTitles.english) continue
-    // Drop hyphen-less duplicates that interface-master generates via t.replaceAll('-','')
-    // Check via direct string method, not regex
-    const isHyphenlessDupe = hyphenlessTitles.some(([withoutHyphens, withSpaces]) => withoutHyphens === title || withSpaces === title)
-    if (isHyphenlessDupe) continue
     push(title)
   }
 
-  if (preferred.length) return preferred
-  return Array.isArray(query.titles) ? query.titles : []
+  if (preferred.length) return dropPunctuationDupes(preferred)
+  // Fallback when AniList provides neither field: cap the array, it can
+  // contain dozens of synonyms and aliases.
+  const fallback = (Array.isArray(query.titles) ? query.titles : [])
+    .filter(title => typeof title === 'string' && isLatinSearchTitle(title))
+    .slice(0, 3)
+  const latinFallback = dropPunctuationDupes(fallback)
+  return latinFallback.length ? latinFallback : (Array.isArray(query.titles) ? query.titles.slice(0, 3) : [])
 }
 
 function stripQualifiers(title) {
@@ -354,6 +418,8 @@ function buildSearchVariants(title) {
     if (out) variants.push(out)
   }
   push(normalized)
+  for (const stripped of stripTrailingQualifierVariants(normalized)) push(stripped)
+  for (const short of shortTitleVariants(normalized)) push(short)
   for (let i = 0; i < variants.length; i++) {
     const current = variants[i]
     for (const stripped of stripTrailingQualifierVariants(current)) push(stripped)
@@ -371,6 +437,85 @@ function stripTrailingQualifierVariants(title) {
   const colon = topLevelColonIndex(text)
   if (colon >= 0) variants.push(text.slice(0, colon))
   return variants
+}
+
+// Remove one trailing season marker for the detected season so season
+// variants don't demand two notations at once (releases use one or the
+// other, never both).
+function stripTrailingSeasonMarker(title, season) {
+  const text = String(title).trim()
+  const padded = String(season).padStart(2, '0')
+  const sfx = ordinalSuffix(season)
+  const patterns = [
+    new RegExp(`\\s+[Ss]0*${season}$`),
+    new RegExp(`\\s+[Ss]eason\\s+0*${season}$`),
+    new RegExp(`\\s+0*${season}${sfx}\\s+[Ss]eason$`, 'i'),
+    new RegExp(`\\s+0*${season}$`),
+  ]
+  for (const re of patterns) {
+    const out = text.replace(re, '').trim()
+    if (out && out !== text) return out
+  }
+  const numerals = Object.keys(ROMAN_MAP)
+    .filter(r => ROMAN_MAP[r] === season)
+    .sort((a, b) => b.length - a.length)
+  if (numerals.length) {
+    const out = text.replace(new RegExp(`\\s+(?:${numerals.join('|')})[.!?]*$`), '').trim()
+    if (out) return out
+  }
+  return text
+}
+
+// Short distinctive phrases release groups actually use instead of the
+// full catalog title:
+// - word adjacent to a parenthesized qualifier ("Word (Qualifier)")
+// - capitalized run inside a comma-led title's tail segment
+function shortTitleVariants(title) {
+  const text = String(title).trim()
+  const variants = []
+  const parenRe = /(\S+)\s*\(([^()]*)\)/g
+  let m
+  while ((m = parenRe.exec(text))) {
+    const prev = m[1].replace(/^[([{'"‘“]+/, '')
+    if (/^[A-Z\u00C0-\u024F]/.test(prev) && prev.length > 1) {
+      const phrase = `${prev} (${m[2].trim()})`
+      if (phrase.length < text.length) variants.push(phrase)
+    }
+  }
+  // Capitalized run inside the tail segment after the last top-level
+  // comma/colon. Whole-title runs are skipped: on a segment-less title
+  // they devolve into generic genre phrases.
+  const cut = Math.max(topLevelCommaIndex(text), topLevelColonIndex(text))
+  if (cut >= 0) {
+    const words = text.slice(cut + 1).trim().split(/\s+/)
+    let best = []
+    let cur = []
+    const flush = () => { if (cur.length > best.length) best = cur; cur = [] }
+    for (const word of words) {
+      if (/^[A-Z\u00C0-\u024F]/.test(word) && !/[?!,;:.]$/.test(word) && !/^[([{'"‘“]/.test(word)) cur.push(word)
+      else flush()
+    }
+    flush()
+    if (best.length >= 3) {
+      const run = best.join(' ')
+      if (run.length < text.length) variants.push(run)
+    }
+  }
+  return variants
+}
+
+function topLevelCommaIndex(text) {
+  let parentheses = 0
+  let brackets = 0
+  for (let i = text.length - 1; i >= 0; i--) {
+    const char = text[i]
+    if (char === ')') parentheses++
+    else if (char === '(') parentheses--
+    else if (char === ']') brackets++
+    else if (char === '[') brackets--
+    else if (char === ',' && parentheses === 0 && brackets === 0) return i
+  }
+  return -1
 }
 
 function trailingQualifierRanges(text) {
@@ -634,6 +779,10 @@ function detectSeasonInternal(title, allowTrailingBare) {
       const before = text.charCodeAt(m.index - 1)
       const afterIdx = m.index + m[1].length
       const after = text.charCodeAt(afterIdx)
+      // A lone single-character numeral inside prose is usually a word
+      // (the English pronoun "I"), not a season marker. Only a trailing
+      // single numeral is plausible as one.
+      if (m[1].length === 1 && afterIdx < text.length) continue
       const beforeOk = m.index === 0 || (before >= 0x30 && before <= 0x39) || before === 0x20 || before === 0x5B || before === 0x28 || before === 0x2D
       const afterOk = afterIdx >= text.length || (after >= 0x30 && after <= 0x39) || after === 0x20 || after === 0x5D || after === 0x29 || after === 0x2E || after === 0x2C
       if (beforeOk && afterOk) return ROMAN_MAP[upper]

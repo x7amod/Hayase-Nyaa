@@ -96,7 +96,7 @@ describe('filtering and classifying performance', () => {
     }, 400)
   })
 
-  it('getSearchTitles handles synonym grouping quickly', () => {
+  it('getSearchTitles ignores synonyms quickly', () => {
     const query = {
       media: {
         title: { romaji: 'Koko wa Ore ni Makasete Saki ni Ike to Ittekara 10-nen ga Tattara Densetsu ni Natteita.', english: 'I Became a Legend After My 10 Year-Long Last Stand', native: 'ここは俺に任せて先に行けと言ってから１０年がたったら伝説になっていた。' },
@@ -104,6 +104,11 @@ describe('filtering and classifying performance', () => {
       },
       titles: ['fallback']
     }
+    assert.deepStrictEqual(getSearchTitles(query), [
+      'Koko wa Ore ni Makasete Saki ni Ike to Ittekara 10-nen ga Tattara Densetsu ni Natteita.',
+      'I Became a Legend After My 10 Year-Long Last Stand',
+      'KokoOre',
+    ])
     assertFast('getSearchTitles 5k', () => {
       for (let i = 0; i < 5000; i++) getSearchTitles(query)
     }, 150)

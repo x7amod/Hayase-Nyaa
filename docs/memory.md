@@ -60,11 +60,21 @@ media title object can contain `romaji`, `english`, `native`, and
    case-insensitively.
 4. For each preferred title, add a season alias when applicable:
    `Season 2` becomes `S2`, and `2nd Season` becomes `S2`.
-5. If neither explicit field is available, fall back to `query.titles`.
+5. Add short single-token aliases from `media.synonyms` (Latin script,
+   length 4–16, no spaces): release groups title with the shorthand, which
+   full titles can never AND-match. Longer synonyms are alternate full
+   titles and are skipped.
+6. If neither explicit field is available, fall back to at most the first
+   three Latin-script entries of `query.titles`.
 
-When at least one Romaji or English field exists, the fallback array is not
-used. This prevents native-language titles, user-preferred titles, and
-unrelated synonyms from creating extra Nyaa requests.
+Native titles, long synonyms, and the rest of `query.titles` are never
+searched: entries carry too many of them and each extra title multiplies
+the plan toward the extension time budget. (Hayase itself builds
+`query.titles` as romaji, english, native, userPreferred, then all
+synonyms, each with season-alias and hyphen-less expansions — see
+`createTitles` in the interface repo.) Punctuation-only duplicates of a
+kept title are dropped. When Latin filtering would leave nothing, the
+first three raw entries are kept.
 
 There is no Japanese-script stripping or detection anymore. A Japanese title
 can still be searched when it is supplied by the fallback `query.titles` array,
@@ -81,7 +91,15 @@ are generated to match common release naming differences:
 - Remove trailing parenthesized or bracketed qualifiers.
 - Remove text after a top-level colon.
 - Remove `!` and `?` punctuation.
+- Short distinctive phrases: the word next to a parenthesized qualifier,
+  and capitalized runs inside the tail segment after a top-level comma or
+  colon (release groups often shorten the catalog title).
 - Preserve normalized variants without duplicate requests.
+
+Terms are ordered most-selective-first (episode-qualified, then season
+variants, then base/variant terms). Fetching races the plan against a time
+budget instead of awaiting every term, so a slow source degrades to partial
+results rather than failing the whole search.
 
 For `single` searches, each title also gets:
 
@@ -90,10 +108,15 @@ For `single` searches, each title also gets:
 - The requested resolution, such as `10 1080p`.
 - The same episode variants with `!` and `?` removed.
 
-When a season is detected, extra terms use `S04`, `Season 4`, and ordinal
-notation such as `4th Season`. Season detection reads the selected query
-titles, not torrent result titles. It recognizes `S2`, `Season 2`, `2nd
-Season`, trailing ordinals, Roman numerals, and trailing bare season numbers.
+When a season is detected, extra terms use the base with its own season
+marker stripped plus `S04`, `Season 4`, and ordinal notation such as `4th
+Season`, plus glued `S04E10` tokens (a spaced episode number can also match
+digits inside unrelated tokens, burying the wanted episode past page one).
+Season detection reads the selected query titles, not torrent result titles.
+It recognizes `S2`, `Season 2`, `2nd Season`, trailing ordinals, Roman
+numerals, and trailing bare season numbers. A lone single-character numeral
+inside prose is ignored (it is usually a word, not a season); only a
+trailing one counts.
 
 For `batch` searches, the plan adds `batch`, `complete`, and episode-range
 terms such as `1-21`, `01-21`, and `01 ~ 21`. A batch search is skipped when
