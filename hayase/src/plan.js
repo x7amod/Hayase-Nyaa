@@ -30,8 +30,9 @@ export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000
     await Promise.race([
       Promise.all(Array.from({ length: workerCount }, worker)),
       new Promise(resolve => {
+        // Keep the timer referenced: a stalled fetch has no event-loop handle,
+        // and Node 22 can exit before an unref'd budget timer resolves.
         timer = setTimeout(() => { stopped = true; resolve() }, budgetMs)
-        if (timer && typeof timer.unref === 'function') timer.unref()
       }),
     ])
   } finally {
