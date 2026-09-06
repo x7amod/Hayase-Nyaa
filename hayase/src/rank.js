@@ -1,4 +1,4 @@
-import { classifyEpisode } from './episode.js'
+import { classifyEpisodes } from './episode.js'
 import { hasAnyResolution, matchesBatch, matchesResolution, resultMetadata } from './filter.js'
 import { detectQuerySeason, detectResultSeason } from './season.js'
 
@@ -29,9 +29,10 @@ export function scoreResult(result, query, searchContext, queryTitles) {
   if (similarity > 0.7) score += 40
   else if (similarity > 0.4) score += 12
   else score -= 15
-  if (searchContext.mode === 'single' && searchContext.episode != null) {
+  const episodes = searchContext.episodeNumbers || [searchContext.episode]
+  if (searchContext.mode === 'single' && episodes.some(episode => episode != null)) {
     const metadata = resultMetadata(result.title, query, searchContext)
-    const verdict = metadata ? metadata.episode : classifyEpisode(result.title, searchContext.episode)
+    const verdict = metadata ? metadata.episode : classifyEpisodes(result.title, searchContext.episodeNumbers || [searchContext.episode])
     if (verdict === 'exact') score += 30
     else if (verdict === 'conflict') score -= 30
     const resultSeason = metadata ? metadata.resultSeason : detectResultSeason(result.title)
@@ -42,7 +43,8 @@ export function scoreResult(result, query, searchContext, queryTitles) {
   if (searchContext.mode === 'batch' && (metadata ? metadata.batch : matchesBatch(result.title, searchContext.episodeCount))) score += 30
   if (query?.resolution ? (metadata ? metadata.resolution : matchesResolution(result.title, query.resolution)) : true) score += 15
   else if (query?.resolution && (metadata ? metadata.hasResolution : hasAnyResolution(result.title))) score -= 5
-  if (/\b(batch|complete|season|s\d{1,2})\b/i.test(result.title)) score += searchContext.mode === 'batch' ? 10 : -10
+  if (/\b(batch|complete)\b/i.test(result.title)) score += searchContext.mode === 'batch' ? 10 : -10
+  else if (searchContext.mode !== 'single' && /\b(season|s\d{1,2})\b/i.test(result.title)) score += searchContext.mode === 'batch' ? 10 : -10
   score += Math.min(result.seeders || 0, 100) / 10
   return score
 }

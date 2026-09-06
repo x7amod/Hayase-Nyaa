@@ -24,11 +24,11 @@ export function detectSeason(title) {
 
 export function detectSeasonInternal(title, allowTrailingBare) {
   const text = String(title)
-  let match = SEASON_S_RE.exec(text)
-  if (match) return Number(match[1])
-  match = SEASON_ORDINAL_RE.exec(text)
+  let match = SEASON_ORDINAL_RE.exec(text)
   if (match) return Number(match[1])
   match = TRAILING_ORDINAL_RE.exec(text)
+  if (match) return Number(match[1])
+  match = SEASON_S_RE.exec(text)
   if (match) return Number(match[1])
   ROMAN_RE.lastIndex = 0
   while ((match = ROMAN_RE.exec(text))) {

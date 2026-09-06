@@ -10,7 +10,13 @@ const NyaaSi = new class NyaaSi {
 
   single(query) {
     console.log('[NyaaSi] single()', { titles: query.titles, episode: query.episode, resolution: query.resolution, exclusions: query.exclusions, anilistId: query.anilistId })
-    return this.search(query, { mode: 'single', episode: query.episode, resolution: query.resolution })
+    return this.search(query, {
+      mode: 'single',
+      episode: query.episode,
+      absoluteEpisodeNumber: query.absoluteEpisodeNumber,
+      episodeNumbers: [query.episode, query.absoluteEpisodeNumber],
+      resolution: query.resolution,
+    })
   }
 
   batch(query) {
@@ -37,14 +43,14 @@ const NyaaSi = new class NyaaSi {
       console.log('[NyaaSi] search plan:', searchPlan.map(entry => entry.term))
       const fetcher = query.fetch || fetch
       let results = []
-      const queryTitles = searchPlan.map(entry => entry.sourceTitle)
+      const queryTitles = [...new Set([...searchTitles, ...searchPlan.map(entry => entry.sourceTitle)])]
       const outcomes = await fetchSearchPlan(fetcher, this.base, searchPlan)
       for (const outcome of outcomes) {
         if (outcome && outcome.status === 'fulfilled') results = dedupeResults(results.concat(outcome.value.map(toTorrentResult)))
       }
 
       console.log('[NyaaSi] raw results:', results.length)
-      const resultContext = { ...searchContext, querySeason: detectQuerySeason(queryTitles), resultCache: new Map() }
+      const resultContext = { ...searchContext, querySeason: detectQuerySeason(searchTitles), resultCache: new Map() }
       const filtered = results.filter(result => matchesQuery(result.title, query, resultContext, queryTitles))
       console.log('[NyaaSi] after filter:', filtered.length)
       const ranked = rankResults(filtered, query, resultContext, queryTitles)

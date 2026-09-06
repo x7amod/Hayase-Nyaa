@@ -10,9 +10,17 @@ export function isPlausibleEpisode(title, episode) {
   return classifyEpisode(title, episode) === 'exact'
 }
 
+export function classifyEpisodes(title, episodes = []) {
+  const verdicts = episodes.filter(episode => episode != null).map(episode => classifyEpisode(title, episode))
+  if (verdicts.includes('range')) return 'range'
+  if (verdicts.includes('exact')) return 'exact'
+  if (!verdicts.length || verdicts.every(verdict => verdict === 'absent')) return 'absent'
+  return 'conflict'
+}
+
 export function stripEpisodeNoise(title) {
   return String(title)
-    .replace(/\b\d{3,4}p\b/gi, ' ')
+    .replace(/\b\d{3,4}p\d*\b/gi, ' ')
     .replace(/\b\d{1,5}\s*[xX]\s*\d{1,5}\b/g, ' ')
     .replace(/\b\d+(?:[.,]\d+)?\s*(?:KiB|MiB|GiB|TiB|KB|MB|GB)\b/gi, ' ')
     .replace(/\b(?:19|20)\d{2}\b/g, ' ')

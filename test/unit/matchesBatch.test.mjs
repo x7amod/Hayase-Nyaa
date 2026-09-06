@@ -20,6 +20,10 @@ describe('matchesBatch', () => {
         assert.strictEqual(matchesBatch(title, 21), true)
       })
     }
+
+    it('accepts en-dash ranges even when a batch keyword is present', () => {
+      assert.strictEqual(matchesBatch('Show 01–21 [Batch]', 21), true)
+    })
   })
 
   describe('complete keyword', () => {

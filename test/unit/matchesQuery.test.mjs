@@ -58,6 +58,39 @@ describe('matchesQuery — episode filtering', () => {
     )
     assert.strictEqual(results.length, 0)
   })
+
+  it('accepts an absolute-numbered release for a seasonal episode', async () => {
+    const results = await Nyaa.single({
+      titles: ['Show'],
+      episode: 1,
+      absoluteEpisodeNumber: 26,
+      resolution: '1080',
+      exclusions: [],
+      fetch: mockFetch(buildRss([makeItem({ title: '[Group] Show - 26 (1080p)', hash: 'c'.repeat(40) })])),
+    })
+    assert.strictEqual(results.length, 1)
+  })
+
+  it('rejects a result from a different season in glued SxxEyy notation', async () => {
+    const results = await searchSingle(['Show 4'], 10, '1080', [
+      '[Group] Show S03E10 [1080p]',
+    ])
+    assert.strictEqual(results.length, 0)
+  })
+
+  it('keeps the season from a qualified query title', async () => {
+    const results = await searchSingle(['Show (Season 2)'], 1, '1080', [
+      '[Group] Show S03E01 [1080p]',
+    ])
+    assert.strictEqual(results.length, 0)
+  })
+
+  it('rejects unrelated titles even when episode and resolution match', async () => {
+    const results = await searchSingle(['Unique Anime'], 1, '1080', [
+      '[Group] Completely Unrelated - 01 [1080p]',
+    ])
+    assert.strictEqual(results.length, 0)
+  })
 })
 
 describe('matchesQuery — resolution filtering', () => {
@@ -73,6 +106,24 @@ describe('matchesQuery — resolution filtering', () => {
         assert.fail(`wrong resolution in: ${r.title}`)
       }
     }
+  })
+
+  it('does not treat an episode number as a resolution', async () => {
+    const results = await searchSingle(['Show'], 1080, '1080', [
+      '[Group] Show - 1080 [720p]',
+    ])
+    assert.strictEqual(results.length, 0)
+  })
+
+  it('recognizes high-frame-rate resolutions and 4K', async () => {
+    const highFrameRate = await searchSingle(['Show'], 1, '720', [
+      '[Group] Show - 01 [1080p60]',
+    ])
+    const fourK = await searchSingle(['Show'], 1, '2160', [
+      '[Group] Show - 01 [4K]',
+    ])
+    assert.strictEqual(highFrameRate.length, 0)
+    assert.strictEqual(fourK.length, 1)
   })
 })
 
@@ -96,6 +147,11 @@ describe('matchesQuery — scene group survival', () => {
       it(`filters wrong season: ${title.slice(0, 80)}`, async () => {
         const results = await searchSingle(['Mairimashita! Iruma-kun 4'], ep, '1080', [title])
         assert.strictEqual(results.length, 0, 'S3 should be filtered when searching for S4')
+      })
+    } else if (!/Mairimashita|Iruma/i.test(title)) {
+      it(`rejects unrelated title: ${title.slice(0, 80)}`, async () => {
+        const results = await searchSingle(['Mairimashita! Iruma-kun 4'], ep, '1080', [title])
+        assert.strictEqual(results.length, 0)
       })
     } else {
       it(`survives filter: ${title.slice(0, 80)}`, async () => {

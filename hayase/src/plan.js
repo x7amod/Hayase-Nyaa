@@ -8,6 +8,7 @@ export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000
   const outcomes = new Array(searchPlan.length)
   let nextIndex = 0
   let stopped = false
+  const controller = new AbortController()
 
   const worker = async () => {
     while (nextIndex < searchPlan.length && !stopped) {
@@ -16,7 +17,7 @@ export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000
       try {
         outcomes[index] = {
           status: 'fulfilled',
-          value: await fetchResults(fetcher, base, term),
+          value: await fetchResults(fetcher, base, term, controller.signal),
         }
       } catch (reason) {
         outcomes[index] = { status: 'rejected', reason }
@@ -32,7 +33,7 @@ export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000
       new Promise(resolve => {
         // Keep the timer referenced: a stalled fetch has no event-loop handle,
         // and Node 22 can exit before an unref'd budget timer resolves.
-        timer = setTimeout(() => { stopped = true; resolve() }, budgetMs)
+        timer = setTimeout(() => { stopped = true; controller.abort(); resolve() }, budgetMs)
       }),
     ])
   } finally {
@@ -48,22 +49,21 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
     .map(normalizeSearch)
     .filter(Boolean)
 
-  if (searchContext.mode === 'single' && searchContext.episode != null) {
-    const episode = searchContext.episode
-    const padded = String(episode).padStart(2, '0')
+  if (searchContext.mode === 'single' && (searchContext.episode != null || searchContext.absoluteEpisodeNumber != null)) {
+    const episodes = [...new Set([searchContext.episode, searchContext.absoluteEpisodeNumber].filter(episode => episode != null).map(String))]
     const resolution = searchContext.resolution
 
     for (const base of cleanTitles) {
-      const { stripped, clean, needsClean } = preparedBase(base)
-      if (resolution) {
-        add(`${stripped} ${episode} ${resolution}p`, stripped)
-        if (needsClean) add(`${clean} ${episode} ${resolution}p`, clean)
-      } else {
-        add(`${stripped} ${episode}`, stripped)
-        if (padded !== String(episode)) add(`${stripped} ${padded}`, stripped)
-        if (needsClean) {
-          add(`${clean} ${episode}`, clean)
-          if (padded !== String(episode)) add(`${clean} ${padded}`, clean)
+      for (const variant of buildSearchVariants(base)) {
+        const { stripped, clean } = preparedBase(variant)
+        const bases = [...new Set([variant, stripped, clean].filter(Boolean))]
+        for (const searchBase of bases) {
+          for (const episode of episodes) {
+            const padded = String(episode).padStart(2, '0')
+            const suffix = resolution ? ` ${resolution}p` : ''
+            add(`${searchBase} ${episode}${suffix}`, variant)
+            if (padded !== String(episode)) add(`${searchBase} ${padded}${suffix}`, variant)
+          }
         }
       }
     }
@@ -72,24 +72,19 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
     if (season) {
       const suffix = ordinalSuffix(season)
       const paddedSeason = String(season).padStart(2, '0')
-      const paddedEpisode = String(episode).padStart(2, '0')
       for (const base of cleanTitles) {
         const { clean } = preparedBase(base)
         const seasonless = stripTrailingSeasonMarker(clean, season)
-        add(`${seasonless} S${paddedSeason} ${episode}`, clean)
-        add(`${seasonless} S${season} ${episode}`, clean)
-        add(`${seasonless} Season ${season} ${episode}`, clean)
-        add(`${seasonless} ${season}${suffix} Season ${episode}`, seasonless)
-        add(`${seasonless} S${paddedSeason}E${paddedEpisode}`, clean)
-        add(`${seasonless} S${season}E${paddedEpisode}`, clean)
+        for (const episode of episodes) {
+          const paddedEpisode = String(episode).padStart(2, '0')
+          add(`${seasonless} S${paddedSeason} ${episode}`, clean)
+          add(`${seasonless} S${season} ${episode}`, clean)
+          add(`${seasonless} Season ${season} ${episode}`, clean)
+          add(`${seasonless} ${season}${suffix} Season ${episode}`, seasonless)
+          add(`${seasonless} S${paddedSeason}E${paddedEpisode}`, clean)
+          add(`${seasonless} S${season}E${paddedEpisode}`, clean)
+        }
       }
-    }
-  }
-
-  if (searchContext.mode !== 'single') {
-    for (const base of cleanTitles) add(base, base)
-    for (const base of cleanTitles) {
-      for (const variant of buildSearchVariants(base)) add(variant, base)
     }
   }
 
@@ -126,6 +121,13 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
           add(`${ordinalBase} ${season}${suffix} Season 1 ~ ${episodeCount}`, ordinalBase)
         }
       }
+    }
+  }
+
+  if (searchContext.mode !== 'single') {
+    for (const base of cleanTitles) add(base, base)
+    for (const base of cleanTitles) {
+      for (const variant of buildSearchVariants(base)) add(variant, base)
     }
   }
 

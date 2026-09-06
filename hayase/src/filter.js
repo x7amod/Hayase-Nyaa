@@ -9,14 +9,15 @@ import {
   batchRangeRegexCache,
   resolutionRegexCache,
 } from './constants.js'
-import { classifyEpisode, stripEpisodeNoise } from './episode.js'
+import { classifyEpisode, classifyEpisodes, stripEpisodeNoise } from './episode.js'
 import { detectQuerySeason, detectResultSeason } from './season.js'
 import { hasEpisodeMarker, hasSeasonMarker } from './utils.js'
 
 export function matchesQuery(title, query, searchContext, queryTitles) {
   if (hasExcludedKeyword(title, query?.exclusions)) return false
   const metadata = resultMetadata(title, query, searchContext)
-  const titles = Array.isArray(queryTitles) ? queryTitles : [queryTitles]
+  const titles = (Array.isArray(queryTitles) ? queryTitles : [queryTitles]).filter(title => typeof title === 'string' && title.trim())
+  if (titles.length && !hasTitleOverlap(title, titles)) return false
   if (query?.resolution && metadata && metadata.hasResolution && !metadata.resolution) return false
   if (query?.resolution && !metadata && hasAnyResolution(title) && !matchesResolution(title, query.resolution)) return false
   if (searchContext.mode !== 'movie') {
@@ -27,7 +28,8 @@ export function matchesQuery(title, query, searchContext, queryTitles) {
     }
   }
   if (searchContext.mode === 'single') {
-    if (searchContext.episode != null && (metadata ? metadata.episode !== 'exact' : classifyEpisode(title, searchContext.episode) !== 'exact')) return false
+    const episodes = searchContext.episodeNumbers || [searchContext.episode]
+    if (episodes.some(episode => episode != null) && (metadata ? metadata.episode !== 'exact' : classifyEpisodes(title, episodes) !== 'exact')) return false
   }
   if (searchContext.mode === 'batch') {
     if (metadata ? !metadata.batch : !matchesBatch(title, searchContext.episodeCount)) return false
@@ -48,7 +50,7 @@ export function resultMetadata(title, query, searchContext) {
     metadata.resolution = matchesResolution(title, query.resolution)
   }
   if (searchContext.mode !== 'movie' && metadata.resultSeason === undefined) metadata.resultSeason = detectResultSeason(title)
-  if (searchContext.mode === 'single' && searchContext.episode != null && metadata.episode === undefined) metadata.episode = classifyEpisode(title, searchContext.episode)
+  if (searchContext.mode === 'single' && (searchContext.episodeNumbers || [searchContext.episode]).some(episode => episode != null) && metadata.episode === undefined) metadata.episode = classifyEpisodes(title, searchContext.episodeNumbers || [searchContext.episode])
   if (searchContext.mode === 'batch' && metadata.batch === undefined) metadata.batch = matchesBatch(title, searchContext.episodeCount)
   return metadata
 }
@@ -63,7 +65,7 @@ export function hasExcludedKeyword(title, exclusions = []) {
 
 export function matchesResolution(title, resolution) {
   if (!resolution) return true
-  const res = String(resolution)
+  const res = normalizeResolution(resolution)
   DIMENSION_RE.lastIndex = 0
   let match
   while ((match = DIMENSION_RE.exec(title))) {
@@ -73,10 +75,12 @@ export function matchesResolution(title, resolution) {
   const withoutDimensions = String(title).replace(DIMENSION_RE, ' ')
   let regex = resolutionRegexCache.get(res)
   if (!regex) {
-    regex = new RegExp(`(?:^|[^0-9])${res}p?(?:[^0-9]|$)`, 'i')
+    regex = new RegExp(`(?:^|[^0-9])${res}p\\d*(?:[^0-9]|$)`, 'i')
     resolutionRegexCache.set(res, regex)
   }
-  return regex.test(withoutDimensions)
+  if (regex.test(withoutDimensions)) return true
+  const kMatch = withoutDimensions.match(/(?:^|[^0-9])([0-9]+(?:\.[0-9]+)?)k(?:[^a-z0-9]|$)/i)
+  return Boolean(kMatch && normalizeResolution(`${kMatch[1]}k`) === res)
 }
 
 export function hasAnyResolution(title) {
@@ -84,6 +88,31 @@ export function hasAnyResolution(title) {
   DIMENSION_RE.lastIndex = 0
   if (DIMENSION_RE.test(title)) return true
   return K_RE.test(title)
+}
+
+function normalizeResolution(resolution) {
+  const value = String(resolution).trim().toLowerCase()
+  const kMatch = value.match(/^([0-9]+(?:\.[0-9]+)?)k$/)
+  if (kMatch) {
+    const k = Number(kMatch[1])
+    if (k === 4) return '2160'
+    if (k === 2) return '1440'
+  }
+  return value.replace(/p$/, '')
+}
+
+function hasTitleOverlap(title, queryTitles) {
+  const resultWords = titleWords(title)
+  if (!resultWords.size) return false
+  return queryTitles.some(queryTitle => {
+    const queryWords = titleWords(queryTitle)
+    for (const word of queryWords) if (resultWords.has(word)) return true
+    return false
+  })
+}
+
+function titleWords(value) {
+  return new Set(String(value || '').toLowerCase().replace(/[^\w\s-]/g, ' ').split(/\s+/).filter(word => word.length > 1 && !/^\d+$/.test(word)))
 }
 
 export function matchesBatch(title, episodeCount) {
@@ -103,7 +132,7 @@ export function matchesBatch(title, episodeCount) {
       const start = '(?:0?1|01)'
       const end = `(?:0?${episodeCount}|${padded})`
       cached = {
-        range: new RegExp(`(?:^|[^0-9])(?:ep\\.?\\s*)?${start}\\s*(?:[-~]|to|x|/)\\s*${end}(?:[^0-9]|$)`, 'i'),
+        range: new RegExp(`(?:^|[^0-9])(?:ep\\.?\\s*)?${start}\\s*(?:[-~–]|to|x|/)\\s*${end}(?:[^0-9]|$)`, 'i'),
         of: new RegExp(`(?:^|[^0-9])${start}\\s*of\\s*${end}(?:[^0-9]|$)`, 'i'),
       }
       batchRangeRegexCache.set(key, cached)

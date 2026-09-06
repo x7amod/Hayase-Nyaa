@@ -45,4 +45,17 @@ describe('search request scheduling', () => {
     assert.strictEqual(outcomes[0]?.status, 'fulfilled')
     assert.strictEqual(outcomes[1], undefined, 'unstarted terms stay empty instead of hanging')
   })
+
+  it('aborts active requests when the fetch budget expires', async () => {
+    let signal
+    const fetch = async (_url, options) => {
+      signal = options.signal
+      return new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      })
+    }
+
+    await fetchSearchPlan(fetch, 'https://nyaa.si/?q=', [{ term: 'slow' }], 20)
+    assert.ok(signal?.aborted)
+  })
 })

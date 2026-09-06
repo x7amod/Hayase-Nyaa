@@ -12,6 +12,7 @@ export function getSearchTitles(query = {}) {
   const mediaTitles = query.media?.title ?? {}
   const collect = makeDedupCollector()
   const preferred = []
+  let hasExplicitTitle = false
   const push = (title) => {
     const out = collect(title, normalizeSearch)
     if (out) preferred.push(out)
@@ -19,6 +20,7 @@ export function getSearchTitles(query = {}) {
 
   for (const title of [mediaTitles.romaji, mediaTitles.english]) {
     if (typeof title !== 'string' || !title.trim()) continue
+    hasExplicitTitle = true
     push(title)
     const ordinal = title.match(/(\d{1,2})(?:st|nd|rd|th) Season/i)
     const season = title.match(/Season (\d{1,2})/i)
@@ -35,7 +37,7 @@ export function getSearchTitles(query = {}) {
     push(title)
   }
 
-  if (preferred.length) return dropPunctuationDupes(preferred)
+  if (hasExplicitTitle) return dropPunctuationDupes(preferred)
   const fallback = (Array.isArray(query.titles) ? query.titles : [])
     .filter(title => typeof title === 'string' && isLatinSearchTitle(title))
     .slice(0, 3)

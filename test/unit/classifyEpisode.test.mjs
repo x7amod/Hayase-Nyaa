@@ -75,9 +75,8 @@ describe('classifyEpisode', () => {
       assert.strictEqual(classifyEpisode('[SubsPlease] Show S2 (01-10) (1080p)', 5), 'range')
     })
 
-    it('returns conflict for tilde range with spaces (Nyaa treats ~ as separator)', () => {
-      // rangeRe only matches compact ranges (no spaces around separator)
-      assert.strictEqual(classifyEpisode('[Erai-raws] Show - 01 ~ 21 [1080p]', 10), 'conflict')
+    it('returns range for spaced tilde ranges', () => {
+      assert.strictEqual(classifyEpisode('[Erai-raws] Show - 01 ~ 21 [1080p]', 10), 'range')
     })
 
     it('returns range for episode at range endpoint (endpoint is still a batch)', () => {

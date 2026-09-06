@@ -3,3 +3,4 @@
 .vscode/
 node_modules/
 test/fixtures/rss/
+graphify-out/

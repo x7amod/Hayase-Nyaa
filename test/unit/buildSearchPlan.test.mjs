@@ -182,6 +182,23 @@ describe('buildSearchPlan', () => {
       assert.ok(!terms.includes('Show Name'), 'plain base term belongs to batch/movie searches')
     })
 
+    it('includes padded episode terms when resolution is specified', () => {
+      const terms = buildSearchPlan(['Show Name'], { mode: 'single', episode: 1, resolution: '1080' }).map(p => p.term)
+      assert.ok(terms.includes('Show Name 1 1080p'))
+      assert.ok(terms.includes('Show Name 01 1080p'))
+    })
+
+    it('searches absolute episode numbers as well as seasonal episode numbers', () => {
+      const terms = buildSearchPlan(['Show Name'], { mode: 'single', episode: 1, absoluteEpisodeNumber: 26 }).map(p => p.term)
+      assert.ok(terms.includes('Show Name 1'))
+      assert.ok(terms.includes('Show Name 26'))
+    })
+
+    it('preserves meaningful title qualifiers in single searches', () => {
+      const terms = buildSearchPlan(['Show: Subtitle'], { mode: 'single', episode: 1, resolution: '1080' }).map(p => p.term)
+      assert.ok(terms.includes('Show: Subtitle 1 1080p'))
+    })
+
     it('does not emit two-word tail runs', () => {
       // A name-internal comma is not a clause break worth an extra request.
       const plan = buildSearchPlan(
@@ -222,6 +239,14 @@ describe('buildSearchPlan', () => {
   })
 
   describe('batch mode', () => {
+    it('prioritizes batch-specific terms before broad variants', () => {
+      const plan = buildSearchPlan(['A Long Show: Subtitle (Dub)'], { mode: 'batch', episodeCount: 12 })
+      const batchIndex = plan.findIndex(entry => entry.term.endsWith(' batch'))
+      const baseIndex = plan.findIndex(entry => entry.term === 'A Long Show: Subtitle (Dub)')
+      assert.ok(batchIndex >= 0)
+      assert.ok(baseIndex > batchIndex)
+    })
+
     it('includes batch keyword term', () => {
       const plan = buildSearchPlan(['Show Name'], { mode: 'batch', episodeCount: 12 })
       const terms = plan.map(p => p.term)
