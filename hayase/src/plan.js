@@ -86,9 +86,11 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
     }
   }
 
-  for (const base of cleanTitles) add(base, base)
-  for (const base of cleanTitles) {
-    for (const variant of buildSearchVariants(base)) add(variant, base)
+  if (searchContext.mode !== 'single') {
+    for (const base of cleanTitles) add(base, base)
+    for (const base of cleanTitles) {
+      for (const variant of buildSearchVariants(base)) add(variant, base)
+    }
   }
 
   if (searchContext.mode === 'batch') {

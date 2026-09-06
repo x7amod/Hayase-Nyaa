@@ -19,7 +19,7 @@ describe('search request scheduling', () => {
     }
 
     await Nyaa.single({
-      titles: ['Show (Dub) [1080p]'],
+      titles: ['Show (Dub) [1080p]', 'Show Alternate'],
       episode: 1,
       resolution: '1080',
       exclusions: [],

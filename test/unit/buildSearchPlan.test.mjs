@@ -60,10 +60,10 @@ describe('getSearchTitles', () => {
 
 describe('buildSearchPlan', () => {
   describe('single mode', () => {
-    it('includes base title', () => {
+    it('does not include an unqualified base title', () => {
       const plan = buildSearchPlan(['Show Name'], { mode: 'single', episode: 5 })
       const terms = plan.map(p => p.term)
-      assert.ok(terms.includes('Show Name'))
+      assert.ok(!terms.includes('Show Name'))
     })
 
     it('includes episode-qualified term', () => {
@@ -143,7 +143,7 @@ describe('buildSearchPlan', () => {
       // Groups release "Kanteishi (Kari) - 11" under a fragment of the long romaji title.
       const plan = buildSearchPlan(
         ['Saikyou no Shokugyou wa Yuusha demo Kenja demo Naku Kanteishi (Kari) Rashii desu yo?'],
-        { mode: 'single', episode: 11, resolution: '1080' }
+        { mode: 'batch', episodeCount: 11 }
       )
       const terms = plan.map(p => p.term)
       assert.ok(terms.includes('Kanteishi (Kari)'), `should have Kanteishi (Kari) variant, got: ${terms.join(' | ')}`)
@@ -153,7 +153,7 @@ describe('buildSearchPlan', () => {
       // Groups release "All Works Maid - 07" under the tail segment of the long title.
       const plan = buildSearchPlan(
         ['Heroine? Seijo? Iie, All Works Maid desu (Ko)!'],
-        { mode: 'single', episode: 7, resolution: '1080' }
+        { mode: 'batch', episodeCount: 7 }
       )
       const terms = plan.map(p => p.term)
       assert.ok(terms.includes('All Works Maid'), `should have All Works Maid variant, got: ${terms.join(' | ')}`)
@@ -179,7 +179,7 @@ describe('buildSearchPlan', () => {
       const plan = buildSearchPlan(['Show Name'], { mode: 'single', episode: 5, resolution: '1080' })
       const terms = plan.map(p => p.term)
       assert.ok(terms[0].includes('5'), `most selective term should lead, got: ${terms[0]}`)
-      assert.ok(terms.indexOf('Show Name') > 0, 'plain base term should trail selective terms')
+      assert.ok(!terms.includes('Show Name'), 'plain base term belongs to batch/movie searches')
     })
 
     it('does not emit two-word tail runs', () => {
@@ -216,7 +216,7 @@ describe('buildSearchPlan', () => {
       const title = 'Show (Dub (Dual Audio)) [1080p]'
       const plan = buildSearchPlan([title], { mode: 'single', episode: 4 })
       const terms = plan.map(p => p.term)
-      assert.ok(terms.includes('Show'))
+      assert.ok(!terms.includes('Show'))
       assert.ok(terms.includes('Show 4'))
     })
   })
