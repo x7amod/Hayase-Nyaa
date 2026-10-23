@@ -1,7 +1,8 @@
+import { DEFAULT_SEARCH_BUDGET_MS } from './constants.js'
 import { matchesQuery } from './filter.js'
-import { dedupeResults, rankResults } from './rank.js'
-import { fetchSearchPlan, buildSearchPlan } from './plan.js'
-import { getSearchTitles } from './titles.js'
+import { rankResults } from './rank.js'
+import { fetchSearchPlan, buildPrimarySearchPlan, buildSearchPlan } from './plan.js'
+import { getPrimarySearchTitles, getSearchTitles } from './titles.js'
 import { toTorrentResult } from './rss.js'
 import { detectQuerySeason } from './season.js'
 
@@ -36,22 +37,47 @@ const NyaaSi = new class NyaaSi {
 
   async search(query, searchContext) {
     try {
+      const startTime = Date.now()
+      const primaryTitles = getPrimarySearchTitles(query)
       const searchTitles = getSearchTitles(query)
-      const searchPlan = buildSearchPlan(searchTitles, searchContext)
-      if (!searchPlan.length) return []
+      const primaryPlan = buildPrimarySearchPlan(primaryTitles, searchContext)
+      const fullPlan = buildSearchPlan(searchTitles, searchContext)
+      if (!primaryPlan.length && !fullPlan.length) return []
 
-      console.log('[NyaaSi] search plan:', searchPlan.map(entry => entry.term))
+      console.log('[NyaaSi] primary search plan:', primaryPlan.map(entry => entry.term))
       const fetcher = query.fetch || fetch
-      let results = []
-      const queryTitles = [...new Set([...searchTitles, ...searchPlan.map(entry => entry.sourceTitle)])]
-      const outcomes = await fetchSearchPlan(fetcher, this.base, searchPlan)
-      for (const outcome of outcomes) {
-        if (outcome && outcome.status === 'fulfilled') results = dedupeResults(results.concat(outcome.value.map(toTorrentResult)))
+      const results = []
+      const filtered = []
+      const seen = new Set()
+      const queryTitles = [...new Set([...searchTitles, ...fullPlan.map(entry => entry.sourceTitle)])]
+      const resultContext = { ...searchContext, querySeason: detectQuerySeason(searchTitles), resultCache: new Map() }
+      const collectOutcomes = (outcomes) => {
+        for (const outcome of outcomes) {
+          if (!outcome || outcome.status !== 'fulfilled') continue
+          for (const item of outcome.value) {
+            const result = toTorrentResult(item)
+            const key = (result.hash || result.link || result.title || '').toLowerCase()
+            if (!key || seen.has(key)) continue
+            seen.add(key)
+            results.push(result)
+            if (matchesQuery(result.title, query, resultContext, queryTitles)) filtered.push(result)
+          }
+        }
+      }
+
+      collectOutcomes(await fetchSearchPlan(fetcher, this.base, primaryPlan, DEFAULT_SEARCH_BUDGET_MS))
+
+      if (!filtered.length) {
+        const primaryTerms = new Set(primaryPlan.map(entry => entry.term.toLowerCase()))
+        const fallbackPlan = fullPlan.filter(entry => !primaryTerms.has(entry.term.toLowerCase()))
+        const remainingBudget = DEFAULT_SEARCH_BUDGET_MS - (Date.now() - startTime)
+        if (fallbackPlan.length && remainingBudget > 0) {
+          console.log('[NyaaSi] fallback search plan:', fallbackPlan.map(entry => entry.term))
+          collectOutcomes(await fetchSearchPlan(fetcher, this.base, fallbackPlan, remainingBudget))
+        }
       }
 
       console.log('[NyaaSi] raw results:', results.length)
-      const resultContext = { ...searchContext, querySeason: detectQuerySeason(searchTitles), resultCache: new Map() }
-      const filtered = results.filter(result => matchesQuery(result.title, query, resultContext, queryTitles))
       console.log('[NyaaSi] after filter:', filtered.length)
       const ranked = rankResults(filtered, query, resultContext, queryTitles)
       console.log('[NyaaSi] final results:', ranked.map(result => {

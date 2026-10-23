@@ -35,14 +35,32 @@ The extension exposes three search methods:
 
 Each search follows this flow:
 
-1. Select search titles with `getSearchTitles`.
-2. Build a deduplicated Nyaa RSS search plan.
-3. Fetch plan entries with at most two requests in flight.
-4. Parse RSS items into torrent results (with XML entity decoding).
-5. Deduplicate results by hash, link, or title.
-6. Filter results by exclusions, resolution, season, and search mode.
-7. Rank the remaining results by title similarity, episode or batch match,
+1. Select primary search titles (`romaji`, `english`, and short single-token
+   shorthand aliases via `getPrimarySearchTitles`) and full fallback search
+   titles (`getSearchTitles`).
+2. Build a primary Nyaa RSS search plan (`buildPrimarySearchPlan`) from those
+   primary titles, plus the full fallback search plan (`buildSearchPlan`).
+3. Fetch all primary plan entries with at most two requests in flight
+   (`MAX_CONCURRENT_SEARCHES = 2`) within `DEFAULT_SEARCH_BUDGET_MS` (8500ms, kept
+   under Hayase's 9s extension timeout).
+4. Parse RSS items into torrent results (with XML entity decoding), deduplicate by
+   hash, link, or title, and filter by exclusions, resolution, season, and search mode.
+5. Only if the primary search plan returns **0 matching results**, fetch the
+   remaining fallback terms (season aliases, qualifier-stripped variants,
+   de-seasoned `S04`/`Season 4`/`S04E10` terms, and batch ranges) using the
+   remaining time budget.
+6. Rank the matching results by title similarity, episode or batch match,
    resolution, season alignment, and seeders.
+
+Search results cannot be streamed back to Hayase one by one; Hayase awaits the
+single Promise returned by `single`, `batch`, or `movie` and renders results
+only after the entire array is returned all at once. Because Nyaa's nginx rate
+limiter paces responses to roughly 2 requests/second (500ms spacing per IP,
+with a burst queue of 5 before returning HTTP 429) and caps each RSS page at 75
+items, every extra request adds ~0.5s before Hayase displays anything. Searching
+only the Romaji, English, and shorthand primary terms first returns all results
+from those titles in ~1–2s, while reserving the broader variant/season plan
+strictly as a 0-result fallback within the <9s timeout budget.
 
 Individual search-term failures are ignored. If the overall search logic
 throws, the extension returns an empty result list.
@@ -97,10 +115,13 @@ are generated to match common release naming differences:
   colon (release groups often shorten the catalog title).
 - Preserve normalized variants without duplicate requests.
 
-Terms are ordered most-selective-first (episode-qualified, then season
-variants, then base/variant terms). Fetching races the plan against a time
-budget instead of awaiting every term, so a slow source degrades to partial
-results rather than failing the whole search.
+Terms are ordered most-selective-first (primary `!?`-cleaned episode or batch
+terms first, then season-isolated terms led by glued `S04E10` and ordinal season
+tokens, then broader qualifier/variant fallbacks). At runtime, `search()` first
+executes `buildPrimarySearchPlan` (using the Romaji, English, and shorthand
+titles) and only executes the remaining terms from `buildSearchPlan` if 0
+filtered results were found, sharing a total `DEFAULT_SEARCH_BUDGET_MS` (8500ms)
+budget so a search never exceeds Hayase's 9s timeout.
 
 For `single` searches, each title also gets:
 

@@ -1,4 +1,5 @@
 export const MAX_CONCURRENT_SEARCHES = 2
+export const DEFAULT_SEARCH_BUDGET_MS = 8500
 
 export const RESOLUTIONS = ['2160', '1080', '720', '540', '480']
 export const RESOLUTION_P_RE = new RegExp(`\\b(?:${RESOLUTIONS.join('|')})p\\b`, 'i')

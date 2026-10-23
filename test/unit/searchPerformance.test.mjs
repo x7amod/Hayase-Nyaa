@@ -58,4 +58,42 @@ describe('search request scheduling', () => {
     await fetchSearchPlan(fetch, 'https://nyaa.si/?q=', [{ term: 'slow' }], 20)
     assert.ok(signal?.aborted)
   })
+
+  it('searches only romaji, english, and shorthand primary terms when they return results, and falls back only on 0 results', async () => {
+    const requestedWithHits = []
+    const rssHit = `<?xml version="1.0"?><rss><channel><item><title><![CDATA[[Group] Romaji Name - 01 (1080p)]]></title><nyaa:seeders>10</nyaa:seeders><nyaa:infoHash>${'1'.repeat(40)}</nyaa:infoHash><nyaa:size>1.0 GiB</nyaa:size></item></channel></rss>`
+
+    const results = await Nyaa.single({
+      media: { title: { romaji: 'Romaji Name: Subtitle', english: 'English Name: Subtitle' }, synonyms: ['ShortAlias'] },
+      titles: ['Romaji Name: Subtitle', 'English Name: Subtitle', 'ShortAlias'],
+      episode: 1,
+      resolution: '1080',
+      exclusions: [],
+      fetch: async (url) => {
+        requestedWithHits.push(decodeURIComponent(url))
+        return { ok: true, text: async () => rssHit }
+      },
+    })
+
+    assert.strictEqual(results.length, 1)
+    assert.ok(requestedWithHits.some(u => u.includes('Romaji Name: Subtitle')))
+    assert.ok(requestedWithHits.some(u => u.includes('English Name: Subtitle')))
+    assert.ok(requestedWithHits.some(u => u.includes('ShortAlias')))
+    assert.ok(requestedWithHits.every(u => !u.includes('q=Romaji Name 1')), 'should not run stripped fallback variants when primary titles returned results')
+
+    const requestedOnEmpty = []
+    await Nyaa.single({
+      media: { title: { romaji: 'Romaji Name: Subtitle', english: 'English Name: Subtitle' }, synonyms: ['ShortAlias'] },
+      titles: ['Romaji Name: Subtitle', 'English Name: Subtitle', 'ShortAlias'],
+      episode: 1,
+      resolution: '1080',
+      exclusions: [],
+      fetch: async (url) => {
+        requestedOnEmpty.push(decodeURIComponent(url))
+        return { ok: true, text: async () => '<rss></rss>' }
+      },
+    })
+
+    assert.ok(requestedOnEmpty.some(u => u.includes('q=Romaji Name 1')), 'should run stripped fallback variants when primary titles return 0 results')
+  })
 })

@@ -45,6 +45,33 @@ export function getSearchTitles(query = {}) {
   return latinFallback.length ? latinFallback : (Array.isArray(query.titles) ? query.titles.slice(0, 3) : [])
 }
 
+export function getPrimarySearchTitles(query = {}) {
+  const mediaTitles = query.media?.title ?? {}
+  const collect = makeDedupCollector()
+  const primary = []
+  let hasExplicitTitle = false
+  const push = (title) => {
+    const out = collect(title, normalizeSearch)
+    if (out) primary.push(out)
+  }
+
+  for (const title of [mediaTitles.romaji, mediaTitles.english]) {
+    if (typeof title !== 'string' || !title.trim()) continue
+    hasExplicitTitle = true
+    push(title)
+  }
+
+  const synonyms = Array.isArray(query.media?.synonyms) ? query.media.synonyms : []
+  for (const title of synonyms) {
+    if (!isShortAlias(title)) continue
+    if (title === mediaTitles.romaji || title === mediaTitles.english) continue
+    push(title)
+  }
+
+  if (hasExplicitTitle) return dropPunctuationDupes(primary)
+  return getSearchTitles(query)
+}
+
 export function stripQualifiers(title) {
   let stripped = removeBalancedGroups(String(title), '(', ')')
   stripped = removeBalancedGroups(stripped, '[', ']')

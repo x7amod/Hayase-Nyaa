@@ -1,10 +1,10 @@
-import { MAX_CONCURRENT_SEARCHES } from './constants.js'
+import { DEFAULT_SEARCH_BUDGET_MS, MAX_CONCURRENT_SEARCHES } from './constants.js'
 import { detectQuerySeason } from './season.js'
 import { fetchResults } from './rss.js'
 import { buildSearchVariants, stripTrailingSeasonMarker } from './titles.js'
 import { makePlanCollector, normalizeSearch, ordinalSuffix, preparedBase } from './utils.js'
 
-export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000) {
+export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = DEFAULT_SEARCH_BUDGET_MS) {
   const outcomes = new Array(searchPlan.length)
   let nextIndex = 0
   let stopped = false
@@ -42,6 +42,43 @@ export async function fetchSearchPlan(fetcher, base, searchPlan, budgetMs = 9000
   return outcomes
 }
 
+export function buildPrimarySearchPlan(titles = [], searchContext = {}) {
+  const { plan, add } = makePlanCollector()
+  const cleanTitles = (titles || [])
+    .filter(title => typeof title === 'string' && title.trim())
+    .map(normalizeSearch)
+    .filter(Boolean)
+
+  if (searchContext.mode === 'single' && (searchContext.episode != null || searchContext.absoluteEpisodeNumber != null)) {
+    const episodes = [...new Set([searchContext.episode, searchContext.absoluteEpisodeNumber].filter(episode => episode != null).map(String))]
+    const suffix = searchContext.resolution ? ` ${searchContext.resolution}p` : ''
+    for (const base of cleanTitles) {
+      const clean = base.replace(/[!?]+/g, '').replace(/\s+/g, ' ').trim() || base
+      for (const episode of episodes) {
+        const padded = String(episode).padStart(2, '0')
+        add(`${clean} ${episode}${suffix}`, base)
+        if (padded !== String(episode)) add(`${clean} ${padded}${suffix}`, base)
+      }
+    }
+    return plan
+  }
+
+  if (searchContext.mode === 'batch') {
+    for (const base of cleanTitles) {
+      const clean = base.replace(/[!?]+/g, '').replace(/\s+/g, ' ').trim() || base
+      add(`${clean} batch`, base)
+      add(`${clean} complete`, base)
+    }
+    return plan
+  }
+
+  for (const base of cleanTitles) {
+    const clean = base.replace(/[!?]+/g, '').replace(/\s+/g, ' ').trim() || base
+    add(clean, base)
+  }
+  return plan
+}
+
 export function buildSearchPlan(titles = [], searchContext = {}) {
   const { plan, add } = makePlanCollector()
   const cleanTitles = (titles || [])
@@ -52,37 +89,43 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
   if (searchContext.mode === 'single' && (searchContext.episode != null || searchContext.absoluteEpisodeNumber != null)) {
     const episodes = [...new Set([searchContext.episode, searchContext.absoluteEpisodeNumber].filter(episode => episode != null).map(String))]
     const resolution = searchContext.resolution
+    const suffix = resolution ? ` ${resolution}p` : ''
+    const addEpisodes = (searchBase, sourceTitle) => {
+      for (const episode of episodes) {
+        const padded = String(episode).padStart(2, '0')
+        add(`${searchBase} ${episode}${suffix}`, sourceTitle)
+        if (padded !== String(episode)) add(`${searchBase} ${padded}${suffix}`, sourceTitle)
+      }
+    }
 
     for (const base of cleanTitles) {
-      for (const variant of buildSearchVariants(base)) {
-        const { stripped, clean } = preparedBase(variant)
-        const bases = [...new Set([variant, stripped, clean].filter(Boolean))]
-        for (const searchBase of bases) {
-          for (const episode of episodes) {
-            const padded = String(episode).padStart(2, '0')
-            const suffix = resolution ? ` ${resolution}p` : ''
-            add(`${searchBase} ${episode}${suffix}`, variant)
-            if (padded !== String(episode)) add(`${searchBase} ${padded}${suffix}`, variant)
-          }
-        }
-      }
+      addEpisodes(preparedBase(base).clean, base)
     }
 
     const season = detectQuerySeason(cleanTitles)
     if (season) {
-      const suffix = ordinalSuffix(season)
+      const ordSuffix = ordinalSuffix(season)
       const paddedSeason = String(season).padStart(2, '0')
       for (const base of cleanTitles) {
         const { clean } = preparedBase(base)
         const seasonless = stripTrailingSeasonMarker(clean, season)
         for (const episode of episodes) {
           const paddedEpisode = String(episode).padStart(2, '0')
-          add(`${seasonless} S${paddedSeason} ${episode}`, clean)
-          add(`${seasonless} S${season} ${episode}`, clean)
-          add(`${seasonless} Season ${season} ${episode}`, clean)
-          add(`${seasonless} ${season}${suffix} Season ${episode}`, seasonless)
           add(`${seasonless} S${paddedSeason}E${paddedEpisode}`, clean)
+          add(`${seasonless} ${season}${ordSuffix} Season ${episode}`, seasonless)
+          add(`${seasonless} Season ${season} ${episode}`, clean)
+          add(`${seasonless} S${season} ${episode}`, clean)
+          add(`${seasonless} S${paddedSeason} ${episode}`, clean)
           add(`${seasonless} S${season}E${paddedEpisode}`, clean)
+        }
+      }
+    }
+
+    for (const base of cleanTitles) {
+      for (const variant of buildSearchVariants(base)) {
+        const { stripped, clean } = preparedBase(variant)
+        for (const searchBase of [clean, stripped, variant]) {
+          if (searchBase) addEpisodes(searchBase, variant)
         }
       }
     }
@@ -91,11 +134,11 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
   if (searchContext.mode === 'batch') {
     const episodeCount = searchContext.episodeCount
     const padded = episodeCount ? String(episodeCount).padStart(2, '0') : null
-    for (const base of cleanTitles) {
-      const { clean } = preparedBase(base)
-      add(`${clean} batch`, clean)
-      add(`${clean} complete`, clean)
-      add(`${clean} season`, clean)
+    const cleanedBases = cleanTitles.map(base => preparedBase(base).clean)
+    for (const clean of cleanedBases) add(`${clean} batch`, clean)
+    for (const clean of cleanedBases) add(`${clean} complete`, clean)
+    for (const clean of cleanedBases) add(`${clean} season`, clean)
+    for (const clean of cleanedBases) {
       if (episodeCount) {
         add(`${clean} 1-${episodeCount}`, clean)
         add(`${clean} 01-${padded}`, clean)
@@ -108,8 +151,7 @@ export function buildSearchPlan(titles = [], searchContext = {}) {
     const season = detectQuerySeason(cleanTitles)
     if (season) {
       const suffix = ordinalSuffix(season)
-      for (const base of cleanTitles) {
-        const { clean } = preparedBase(base)
+      for (const clean of cleanedBases) {
         const ordinalBase = stripTrailingSeasonMarker(clean, season) || clean
         add(`${ordinalBase} ${season}${suffix} Season batch`, ordinalBase)
         add(`${ordinalBase} ${season}${suffix} Season complete`, ordinalBase)
