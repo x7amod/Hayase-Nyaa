@@ -5,7 +5,7 @@
     "deprecated": false,
     "name": "Nyaa",
     "description": "Searches Nyaa for anime torrents.",
-    "version": "1.2.0",
+    "version": "1.2.1",
     "type": "torrent",
     "accuracy": "medium",
     "ratio": 0,
