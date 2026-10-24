@@ -39,7 +39,13 @@ Each search follows this flow:
    shorthand aliases via `getPrimarySearchTitles`) and full fallback search
    titles (`getSearchTitles`).
 2. Build a primary Nyaa RSS search plan (`buildPrimarySearchPlan`) from those
-   primary titles, plus the full fallback search plan (`buildSearchPlan`).
+   primary titles: `single` uses `!?`-cleaned episode terms plus quoted
+   `" EP "` dash-episode terms (a bare `10` also matches digits inside `1080p`
+   or ranges, while `" 10 "` only matches the episode slot) and glued `S04E10`
+   terms when a season is detected; `batch` uses `batch`/`complete`/`season`
+   plus the bare base title (highest-recall batch term). The full fallback
+   search plan (`buildSearchPlan`) adds season aliases, qualifier-stripped
+   variants, de-seasoned `S04`/`Season 4` terms, and batch ranges.
 3. Fetch all primary plan entries with at most two requests in flight
    (`MAX_CONCURRENT_SEARCHES = 2`) within `DEFAULT_SEARCH_BUDGET_MS` (8500ms, kept
    under Hayase's 9s extension timeout).

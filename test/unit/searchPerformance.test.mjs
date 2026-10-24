@@ -59,6 +59,18 @@ describe('search request scheduling', () => {
     assert.ok(signal?.aborted)
   })
 
+  it('builds high-precision primary terms from RSS research', async () => {
+    const { buildPrimarySearchPlan } = getInternals()
+
+    const single = buildPrimarySearchPlan(['Mairimashita! Iruma-kun 4th Season'], { mode: 'single', episode: 10, resolution: '1080' }).map(e => e.term)
+    assert.ok(single.includes('Mairimashita Iruma-kun 4th Season " 10 " 1080p'), `quoted dash-episode term missing, got: ${single.join(' | ')}`)
+    assert.ok(single.includes('Mairimashita Iruma-kun S04E10 1080p'), `glued SxxEyy term missing, got: ${single.join(' | ')}`)
+
+    const batch = buildPrimarySearchPlan(['Mairimashita! Iruma-kun 3rd Season'], { mode: 'batch', episodeCount: 21 }).map(e => e.term)
+    assert.ok(batch.includes('Mairimashita Iruma-kun 3rd Season season'), `season keyword term missing, got: ${batch.join(' | ')}`)
+    assert.ok(batch.includes('Mairimashita Iruma-kun 3rd Season'), 'bare base term missing from batch primary plan')
+  })
+
   it('searches only romaji, english, and shorthand primary terms when they return results, and falls back only on 0 results', async () => {
     const requestedWithHits = []
     const rssHit = `<?xml version="1.0"?><rss><channel><item><title><![CDATA[[Group] Romaji Name - 01 (1080p)]]></title><nyaa:seeders>10</nyaa:seeders><nyaa:infoHash>${'1'.repeat(40)}</nyaa:infoHash><nyaa:size>1.0 GiB</nyaa:size></item></channel></rss>`

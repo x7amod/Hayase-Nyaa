@@ -58,6 +58,25 @@ export function buildPrimarySearchPlan(titles = [], searchContext = {}) {
         const padded = String(episode).padStart(2, '0')
         add(`${clean} ${episode}${suffix}`, base)
         if (padded !== String(episode)) add(`${clean} ${padded}${suffix}`, base)
+        // Quoted spaced episode isolates "- 10" dash releases: a bare "10"
+        // also matches digits inside "1080p" or ranges, flooding page one
+        // with other episodes, while " 10 " only matches the episode slot.
+        add(`${clean} " ${episode} "${suffix}`, base)
+        if (padded !== String(episode)) add(`${clean} " ${padded} "${suffix}`, base)
+      }
+    }
+    const season = detectQuerySeason(cleanTitles)
+    if (season) {
+      const paddedSeason = String(season).padStart(2, '0')
+      for (const base of cleanTitles) {
+        const clean = base.replace(/[!?]+/g, '').replace(/\s+/g, ' ').trim() || base
+        const seasonless = stripTrailingSeasonMarker(clean, season)
+        for (const episode of episodes) {
+          const paddedEpisode = String(episode).padStart(2, '0')
+          // Glued SxxEyy isolates the episode the same way for groups that
+          // only release under glued notation (DKB, Judas, VARYG).
+          add(`${seasonless} S${paddedSeason}E${paddedEpisode}${suffix}`, clean)
+        }
       }
     }
     return plan
@@ -68,6 +87,10 @@ export function buildPrimarySearchPlan(titles = [], searchContext = {}) {
       const clean = base.replace(/[!?]+/g, '').replace(/\s+/g, ' ').trim() || base
       add(`${clean} batch`, base)
       add(`${clean} complete`, base)
+      add(`${clean} season`, base)
+      // Bare base is the highest-recall batch term: page one carries both
+      // singles and packs, and the batch filter keeps the packs.
+      add(clean, base)
     }
     return plan
   }
