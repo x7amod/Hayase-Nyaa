@@ -6,7 +6,10 @@ import {
   makeDedupCollector,
   normalizeSearch,
   ordinalSuffix,
+  stripQualifiers,
+  topLevelColonIndex,
 } from './utils.js'
+export { stripQualifiers }
 
 export function getSearchTitles(query = {}) {
   const mediaTitles = query.media?.title ?? {}
@@ -70,39 +73,6 @@ export function getPrimarySearchTitles(query = {}) {
 
   if (hasExplicitTitle) return dropPunctuationDupes(primary)
   return getSearchTitles(query)
-}
-
-export function stripQualifiers(title) {
-  let stripped = removeBalancedGroups(String(title), '(', ')')
-  stripped = removeBalancedGroups(stripped, '[', ']')
-  const colon = topLevelColonIndex(stripped)
-  return (colon >= 0 ? stripped.slice(0, colon) : stripped)
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
-function scanBalanced(text, open, close) {
-  const stack = []
-  const ranges = []
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === open) stack.push(i)
-    else if (text[i] === close && stack.length) {
-      const start = stack.pop()
-      if (!stack.length) ranges.push({ start, end: i + 1 })
-    }
-  }
-  return ranges
-}
-
-function removeBalancedGroups(text, open, close) {
-  const ranges = scanBalanced(text, open, close)
-  if (!ranges.length) return text
-  let stripped = text
-  for (let i = ranges.length - 1; i >= 0; i--) {
-    const { start, end } = ranges[i]
-    stripped = stripped.slice(0, start) + stripped.slice(end)
-  }
-  return stripped
 }
 
 export function buildSearchVariants(title) {
@@ -223,18 +193,4 @@ function trailingQualifierRanges(text) {
     end = start
   }
   return ranges
-}
-
-function topLevelColonIndex(text) {
-  let parentheses = 0
-  let brackets = 0
-  for (let i = text.length - 1; i >= 0; i--) {
-    const char = text[i]
-    if (char === ')') parentheses++
-    else if (char === '(') parentheses--
-    else if (char === ']') brackets++
-    else if (char === '[') brackets--
-    else if (char === ':' && parentheses === 0 && brackets === 0) return i
-  }
-  return -1
 }

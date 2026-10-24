@@ -42,18 +42,9 @@ export function preparedBase(base) {
   return { stripped, clean, needsClean: clean !== stripped }
 }
 
-function stripQualifiers(title) {
-  let stripped = String(title)
-  while (true) {
-    const next = removeBalancedGroups(stripped, '(', ')')
-    if (next === stripped) break
-    stripped = next
-  }
-  while (true) {
-    const next = removeBalancedGroups(stripped, '[', ']')
-    if (next === stripped) break
-    stripped = next
-  }
+export function stripQualifiers(title) {
+  let stripped = removeBalancedGroups(String(title), '(', ')')
+  stripped = removeBalancedGroups(stripped, '[', ']')
   const colon = topLevelColonIndex(stripped)
   return (colon >= 0 ? stripped.slice(0, colon) : stripped).replace(/\s+/g, ' ').trim()
 }
@@ -77,7 +68,7 @@ function removeBalancedGroups(text, open, close) {
   return stripped
 }
 
-function topLevelColonIndex(text) {
+export function topLevelColonIndex(text) {
   let parentheses = 0
   let brackets = 0
   for (let i = text.length - 1; i >= 0; i--) {

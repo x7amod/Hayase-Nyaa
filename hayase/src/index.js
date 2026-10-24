@@ -41,26 +41,29 @@ const NyaaSi = new class NyaaSi {
       const primaryTitles = getPrimarySearchTitles(query)
       const searchTitles = getSearchTitles(query)
       const primaryPlan = buildPrimarySearchPlan(primaryTitles, searchContext)
-      const fullPlan = buildSearchPlan(searchTitles, searchContext)
-      if (!primaryPlan.length && !fullPlan.length) return []
+      let fullPlan
+      if (!primaryPlan.length) {
+        fullPlan = buildSearchPlan(searchTitles, searchContext)
+        if (!fullPlan.length) return []
+      }
 
       console.log('[NyaaSi] primary search plan:', primaryPlan.map(entry => entry.term))
       const fetcher = query.fetch || fetch
       const results = []
       const filtered = []
       const seen = new Set()
-      const queryTitles = [...new Set([...searchTitles, ...fullPlan.map(entry => entry.sourceTitle)])]
-      const resultContext = { ...searchContext, querySeason: detectQuerySeason(searchTitles), resultCache: new Map() }
+      let queryTitles = [...new Set([...searchTitles, ...(fullPlan || primaryPlan).map(entry => entry.sourceTitle)])]
+      const exclusions = (query?.exclusions || []).map(e => String(e).toLowerCase().trim()).filter(Boolean)
+      const resultContext = { ...searchContext, exclusions, querySeason: detectQuerySeason(searchTitles), resultCache: new Map() }
       const collectOutcomes = (outcomes) => {
         for (const outcome of outcomes) {
           if (!outcome || outcome.status !== 'fulfilled') continue
           for (const item of outcome.value) {
-            const result = toTorrentResult(item)
-            const key = (result.hash || result.link || result.title || '').toLowerCase()
+            const key = (item.hash || item.Magnet || item.Name || '').toLowerCase()
             if (!key || seen.has(key)) continue
             seen.add(key)
-            results.push(result)
-            if (matchesQuery(result.title, query, resultContext, queryTitles)) filtered.push(result)
+            results.push(item)
+            if (matchesQuery(item.Name, query, resultContext, queryTitles)) filtered.push(toTorrentResult(item))
           }
         }
       }
@@ -68,6 +71,9 @@ const NyaaSi = new class NyaaSi {
       collectOutcomes(await fetchSearchPlan(fetcher, this.base, primaryPlan, DEFAULT_SEARCH_BUDGET_MS))
 
       if (!filtered.length) {
+        if (!fullPlan) fullPlan = buildSearchPlan(searchTitles, searchContext)
+        queryTitles = [...new Set([...searchTitles, ...fullPlan.map(entry => entry.sourceTitle)])]
+        resultContext.queryTitleWords = undefined
         const primaryTerms = new Set(primaryPlan.map(entry => entry.term.toLowerCase()))
         const fallbackPlan = fullPlan.filter(entry => !primaryTerms.has(entry.term.toLowerCase()))
         const remainingBudget = DEFAULT_SEARCH_BUDGET_MS - (Date.now() - startTime)

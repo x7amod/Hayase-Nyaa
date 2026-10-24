@@ -14,10 +14,13 @@ import { detectQuerySeason, detectResultSeason } from './season.js'
 import { hasEpisodeMarker, hasSeasonMarker } from './utils.js'
 
 export function matchesQuery(title, query, searchContext, queryTitles) {
-  if (hasExcludedKeyword(title, query?.exclusions)) return false
+  if (hasExcludedKeyword(title, searchContext?.exclusions || query?.exclusions, Boolean(searchContext?.exclusions))) return false
   const metadata = resultMetadata(title, query, searchContext)
   const titles = (Array.isArray(queryTitles) ? queryTitles : [queryTitles]).filter(title => typeof title === 'string' && title.trim())
-  if (titles.length && !hasTitleOverlap(title, titles)) return false
+  if (titles.length) {
+    const queryWords = searchContext?.resultCache ? (searchContext.queryTitleWords ||= titles.map(titleWords)) : null
+    if (!hasTitleOverlap(title, titles, queryWords)) return false
+  }
   if (query?.resolution && metadata && metadata.hasResolution && !metadata.resolution) return false
   if (query?.resolution && !metadata && hasAnyResolution(title) && !matchesResolution(title, query.resolution)) return false
   if (searchContext.mode !== 'movie') {
@@ -55,8 +58,10 @@ export function resultMetadata(title, query, searchContext) {
   return metadata
 }
 
-export function hasExcludedKeyword(title, exclusions = []) {
+export function hasExcludedKeyword(title, exclusions = [], preNormalized = false) {
+  if (!exclusions || !exclusions.length) return false
   const lowered = title.toLowerCase()
+  if (preNormalized) return exclusions.some(value => lowered.includes(value))
   return exclusions.some(exclusion => {
     const value = String(exclusion).toLowerCase().trim()
     return value && lowered.includes(value)
@@ -101,11 +106,11 @@ function normalizeResolution(resolution) {
   return value.replace(/p$/, '')
 }
 
-function hasTitleOverlap(title, queryTitles) {
+function hasTitleOverlap(title, queryTitles, preparedQueryWords) {
   const resultWords = titleWords(title)
   if (!resultWords.size) return false
-  return queryTitles.some(queryTitle => {
-    const queryWords = titleWords(queryTitle)
+  const sets = preparedQueryWords || queryTitles.map(titleWords)
+  return sets.some(queryWords => {
     for (const word of queryWords) if (resultWords.has(word)) return true
     return false
   })

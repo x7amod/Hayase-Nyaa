@@ -11,10 +11,13 @@ export function isPlausibleEpisode(title, episode) {
 }
 
 export function classifyEpisodes(title, episodes = []) {
-  const verdicts = episodes.filter(episode => episode != null).map(episode => classifyEpisode(title, episode))
-  if (verdicts.includes('range')) return 'range'
-  if (verdicts.includes('exact')) return 'exact'
-  if (!verdicts.length || verdicts.every(verdict => verdict === 'absent')) return 'absent'
+  const valid = episodes.filter(episode => episode != null).map(Number)
+  if (!valid.length) return 'absent'
+  const parsed = extractEpisodeNumbers(title)
+  if (parsed.hasRange) return 'range'
+  if (!parsed.numbers.length) return 'absent'
+  if (parsed.distinctCount > 1 && valid.some(ep => parsed.numbers.includes(ep))) return 'range'
+  if (valid.some(ep => parsed.numbers.includes(ep))) return 'exact'
   return 'conflict'
 }
 
@@ -36,42 +39,30 @@ export function stripEpisodeNoise(title) {
     .replace(/\b0*(\d{1,2})\s+[-–]\s+(?=(?:E|EP)?\s*0*\d{1,4}\b)/gi, ' ')
 }
 
-export function classifyEpisode(title, episode) {
-  if (episode == null) return 'absent'
+function extractEpisodeNumbers(title) {
   const cleaned = stripEpisodeNoise(title)
-  const episodeNumber = Number(episode)
-  let match
-  const hasRange = (() => {
-    CLASSIFY_RANGE_RE.lastIndex = 0
-    while ((match = CLASSIFY_RANGE_RE.exec(cleaned))) {
-      const low = Math.min(Number(match[1]), Number(match[2]))
-      const high = Math.max(Number(match[1]), Number(match[2]))
-      if (episodeNumber >= low && episodeNumber <= high) return true
-      return true
-    }
-    return false
-  })()
-  if (hasRange) return 'range'
+  CLASSIFY_RANGE_RE.lastIndex = 0
+  if (CLASSIFY_RANGE_RE.test(cleaned)) return { hasRange: true, numbers: [], distinctCount: 0 }
 
-  const allNumbers = []
+  const numbers = []
+  let match
   CLASSIFY_EP_RE.lastIndex = 0
-  while ((match = CLASSIFY_EP_RE.exec(cleaned))) allNumbers.push(Number(match[1]))
+  while ((match = CLASSIFY_EP_RE.exec(cleaned))) numbers.push(Number(match[1]))
   CLASSIFY_SLOT_RE.lastIndex = 0
-  while ((match = CLASSIFY_SLOT_RE.exec(cleaned))) allNumbers.push(Number(match[1]))
+  while ((match = CLASSIFY_SLOT_RE.exec(cleaned))) numbers.push(Number(match[1]))
   CLASSIFY_STANDALONE_RE.lastIndex = 0
   while ((match = CLASSIFY_STANDALONE_RE.exec(cleaned))) {
-    const numberEnd = CLASSIFY_STANDALONE_RE.lastIndex
-    let next = numberEnd
+    let next = CLASSIFY_STANDALONE_RE.lastIndex
     while (next < cleaned.length && /\s/.test(cleaned[next])) next++
     const nextChar = cleaned[next]
     if (nextChar && /[A-Za-z]/.test(nextChar)) continue
-    allNumbers.push(Number(match[1]))
+    numbers.push(Number(match[1]))
   }
-  if (allNumbers.length > 1) {
-    const distinct = [...new Set(allNumbers)]
-    if (distinct.length > 1 && distinct.includes(episodeNumber)) return 'range'
-  }
-  if (!allNumbers.length) return 'absent'
-  if (allNumbers.includes(episodeNumber)) return 'exact'
-  return 'conflict'
+  const distinctCount = numbers.length > 1 ? new Set(numbers).size : numbers.length
+  return { hasRange: false, numbers, distinctCount }
+}
+
+export function classifyEpisode(title, episode) {
+  if (episode == null) return 'absent'
+  return classifyEpisodes(title, [episode])
 }

@@ -1,6 +1,6 @@
 {
   "name": "Hayase-Nyaa",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Community-maintained Nyaa extension for Hayase.",
   "main": "index.json",
   "scripts": {

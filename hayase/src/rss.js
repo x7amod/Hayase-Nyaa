@@ -33,7 +33,9 @@ export function normalizeTags(tags) {
 }
 
 export function decodeXmlEntities(str) {
-  return String(str)
+  const s = String(str)
+  if (!s.includes('&')) return s
+  return s
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -62,6 +64,7 @@ export function parseRssResults(xml) {
     return {
       Name: title,
       Magnet: magnet,
+      hash,
       Seeders: extract('nyaa:seeders'),
       Leechers: extract('nyaa:leechers'),
       Downloads: extract('nyaa:downloads'),
@@ -89,7 +92,7 @@ function decodeCodePoint(value) {
 
 export function extractTags(title, magnet = '') {
   const tags = []
-  if (/\bmulti[\s-]?sub\b/i.test(title) || /\bmulti[\s-]?sub\b/i.test(decodeURIComponentSafe(magnet))) tags.push('Multi Sub')
+  if (/\bmulti[\s-]?sub\b/i.test(title) || (magnet && !magnet.startsWith('magnet:?xt=urn:btih:') && /\bmulti[\s-]?sub\b/i.test(decodeURIComponentSafe(magnet))) || (magnet.includes('&') && /\bmulti[\s-]?sub\b/i.test(decodeURIComponentSafe(magnet)))) tags.push('Multi Sub')
   return tags
 }
 

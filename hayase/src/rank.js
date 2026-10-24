@@ -18,9 +18,9 @@ export function rankResults(results, query, searchContext, queryTitles) {
     ? searchContext
     : { ...searchContext, queryWordSets: titles.map(wordSet) }
   return results
-    .map(result => ({ ...result, _score: scoreResult(result, query, rankingContext, queryTitles) }))
-    .sort((a, b) => b._score - a._score || b.seeders - a.seeders)
-    .map(({ _score, ...result }) => result)
+    .map(result => [result, scoreResult(result, query, rankingContext, queryTitles)])
+    .sort((a, b) => b[1] - a[1] || b[0].seeders - a[0].seeders)
+    .map(entry => entry[0])
 }
 
 export function scoreResult(result, query, searchContext, queryTitles) {
@@ -29,17 +29,16 @@ export function scoreResult(result, query, searchContext, queryTitles) {
   if (similarity > 0.7) score += 40
   else if (similarity > 0.4) score += 12
   else score -= 15
+  const metadata = resultMetadata(result.title, query, searchContext)
   const episodes = searchContext.episodeNumbers || [searchContext.episode]
   if (searchContext.mode === 'single' && episodes.some(episode => episode != null)) {
-    const metadata = resultMetadata(result.title, query, searchContext)
-    const verdict = metadata ? metadata.episode : classifyEpisodes(result.title, searchContext.episodeNumbers || [searchContext.episode])
+    const verdict = metadata ? metadata.episode : classifyEpisodes(result.title, episodes)
     if (verdict === 'exact') score += 30
     else if (verdict === 'conflict') score -= 30
     const resultSeason = metadata ? metadata.resultSeason : detectResultSeason(result.title)
     const querySeason = searchContext.querySeason !== undefined ? searchContext.querySeason : detectQuerySeason(Array.isArray(queryTitles) ? queryTitles : [queryTitles])
     if (resultSeason && querySeason && resultSeason === querySeason) score += 8
   }
-  const metadata = resultMetadata(result.title, query, searchContext)
   if (searchContext.mode === 'batch' && (metadata ? metadata.batch : matchesBatch(result.title, searchContext.episodeCount))) score += 30
   if (query?.resolution ? (metadata ? metadata.resolution : matchesResolution(result.title, query.resolution)) : true) score += 15
   else if (query?.resolution && (metadata ? metadata.hasResolution : hasAnyResolution(result.title))) score -= 5
